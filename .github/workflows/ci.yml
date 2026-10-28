@@ -22,6 +22,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
+        tz: [UTC]
         # One run away from UTC, so a test that only passes in UTC fails here.
         include:
           - python-version: "3.12"
@@ -44,7 +45,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: pytest-py${{ matrix.python-version }}-${{ matrix.tz && 'new-york' || 'default' }}
+          name: pytest-py${{ matrix.python-version }}-${{ matrix.tz == 'America/New_York' && 'new-york' || 'utc' }}
           path: test-results/junit.xml
           retention-days: 14
           if-no-files-found: warn
