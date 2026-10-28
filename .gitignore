@@ -149,6 +149,10 @@ activemq-data/
 
 # Environments
 .env
+.env.*
+!.env.example
+!.env.*.example
+.DS_Store
 .envrc
 .venv
 env/
@@ -221,3 +225,17 @@ __marimo__/
 # Enterprise env file (secrets) and generated run reports
 .env.enterprise
 reports/
+
+# Private headless-worker artifacts.
+local-data/
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+private-config/
+.private/
+chatgpt-auth.json*
+*.secrets.json
+# Runtime backend settings (example templates remain publishable).
+settings.json
+settings.json.*

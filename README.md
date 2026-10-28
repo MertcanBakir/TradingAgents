@@ -1,3 +1,13 @@
+<!-- Local headless service: isolated from the upstream interactive CLI. -->
+This fork adds FinBot analysis services, a Supabase backend and a personal
+EC2 deployment with dynamic ChatGPT model discovery to TradingAgents v0.7.0.
+The original project's license and attribution are preserved below.
+
+For the local analysis worker, JSON contracts, and memory adapter, see
+[Local analysis service](docs/local-analysis-service.md).
+[API, Supabase and worker backend](docs/hosted-backend.md).
+[Personal EC2 + ChatGPT session deployment](docs/personal-backend.md).
+
 <p align="center">
   <img src="tradingagents/assets/tauric-logo.svg" width="60%" alt="Tauric Research">
 </p>

@@ -129,6 +129,55 @@ def _graph(tmp_path, monkeypatch, model, debug=False, **config):
 
 
 @pytest.mark.unit
+def test_headless_service_real_graph_injects_user_memory_without_cli_side_effects(tmp_path, monkeypatch, offline):
+    from datetime import UTC, date, datetime
+    from pathlib import Path
+    from uuid import uuid4
+
+    from tradingagents.dataflows import config as data_config
+    from tradingagents.memory import settlement
+    from tradingagents.service.engine import AnalysisEngine
+    from tradingagents.service.memory import MemoryDecision, MemoryOutcome, SQLiteMemoryRepository
+    from tradingagents.service.models import AnalysisRequest, LLMChoice, ServiceSettings
+
+    user = uuid4()
+    memory = SQLiteMemoryRepository(tmp_path / "private.sqlite3")
+    old = MemoryDecision(analysis_id=uuid4(), user_id=user, ticker="NVDA",
+                         analysis_date=date(2025, 12, 1), rating="Buy", decision="Prior decision",
+                         created_at=datetime(2025, 12, 1, tzinfo=UTC),
+                         evaluation_trading_days=5, benchmark="SPY")
+    memory.save_decision(old)
+    memory.resolve(user_id=user, analysis_id=old.analysis_id, outcome=MemoryOutcome(
+        raw_return=.02, benchmark_return=.01, entry_date=date(2025, 12, 2), exit_date=date(2025, 12, 9),
+        observed_trading_days=5, reflection="HEADLESS_MEMORY_LESSON",
+        resolved_at=datetime(2025, 12, 10, tzinfo=UTC)))
+    captured = []
+    original_structured = ScriptedModel.with_structured_output
+
+    def capture_pm(self, schema, **kwargs):
+        if schema is schemas.PortfolioDecision:
+            return RunnableLambda(lambda messages: captured.append(str(messages)) or STRUCTURED[schema])
+        return original_structured(self, schema, **kwargs)
+
+    monkeypatch.setattr(ScriptedModel, "with_structured_output", capture_pm)
+    monkeypatch.setattr(trading_graph, "create_tier_client", lambda *a, **k: _Client(ScriptedModel(structured=True)))
+    monkeypatch.setattr(settlement, "settle_all_pending", lambda *a, **k: pytest.fail("No settlement in request"))
+    cli_memory = Path(DEFAULT_CONFIG["memory_log_path"])
+    cli_memory.parent.mkdir(parents=True, exist_ok=True)
+    cli_memory.write_text("CLI_MEMORY_UNCHANGED")
+    before = copy.deepcopy(data_config._config)
+    settings = ServiceSettings(quick=LLMChoice(provider="chatgpt", model="gpt-5.6-sol"),
+                               deep=LLMChoice(provider="chatgpt", model="gpt-5.6-sol"))
+    result = AnalysisEngine(settings=settings, memory=memory).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=TRADE_DATE), user_id=user)
+    assert result.quality == "complete" and result.memory_saved
+    assert result.final_rating == "Overweight" and result.trade_action == "Buy"
+    assert any("HEADLESS_MEMORY_LESSON" in prompt for prompt in captured)
+    assert before == data_config._config
+    assert cli_memory.read_text() == "CLI_MEMORY_UNCHANGED"
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("structured", [False, True], ids=["free-text", "structured"])
 def test_a_full_run_reaches_a_logged_decision(tmp_path, monkeypatch, offline, structured):
     graph = _graph(tmp_path, monkeypatch, ScriptedModel(structured=structured))

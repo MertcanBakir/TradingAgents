@@ -1,0 +1,64 @@
+# Personal single-owner deployment; no changes to upstream docker-compose.yml.
+# Prepare private bind mounts as documented before starting. No secrets in image.
+name: lucrari-personal
+x-backend: &backend
+  image: ${LUCRARI_IMAGE:?Set a versioned image tag or digest}
+  build:
+    context: .
+    dockerfile: Dockerfile.worker
+  user: "1000:1000"
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:mode=1777,size=256m
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  environment:
+    LUCRARI_BACKEND_SETTINGS_FILE: /run/private/settings.json
+    TRADINGAGENTS_NO_UPDATE_CHECK: "1"
+    TRADINGAGENTS_CACHE_DIR: /tmp/market-cache
+    LANGCHAIN_TRACING_V2: "false"
+    LANGSMITH_TRACING: "false"
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+services:
+  api:
+    <<: *backend
+    entrypoint: [uvicorn, tradingagents.service.backend.runtime:application, --factory, --host, 0.0.0.0, --port, "8000", --no-access-log]
+    environment:
+      LUCRARI_BACKEND_SETTINGS_FILE: /run/private/settings.json
+      LUCRARI_DISPATCHER: database
+      TRADINGAGENTS_NO_UPDATE_CHECK: "1"
+    volumes:
+      - ${LUCRARI_PRIVATE_DIR:?Set private configuration directory}/settings.json:/run/private/settings.json:ro
+    expose: ["8000"]
+  worker:
+    <<: *backend
+    entrypoint: [python, -m, tradingagents.service.backend.runtime]
+    command: [serve-worker]
+    stop_grace_period: 40s
+    volumes:
+      - ${LUCRARI_PRIVATE_DIR}/settings.json:/run/private/settings.json:ro
+      - ${LUCRARI_PRIVATE_DIR}/chatgpt:/run/chatgpt
+  maintenance:
+    <<: *backend
+    entrypoint: [python, -m, tradingagents.service.backend.runtime]
+    command: [maintain]
+    volumes:
+      - ${LUCRARI_PRIVATE_DIR}/settings.json:/run/private/settings.json:ro
+  edge:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      LUCRARI_DOMAIN: ${LUCRARI_DOMAIN:?Set your HTTPS domain}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./deploy/personal/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+volumes:
+  caddy_data:
+  caddy_config:

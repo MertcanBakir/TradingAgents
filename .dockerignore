@@ -13,3 +13,13 @@ results
 eval_results
 Dockerfile
 docker-compose.yml
+.env*
+local-data
+reports
+*.sqlite3*
+.pytest_cache
+.ruff_cache
+private-config
+.private
+**/chatgpt-auth.json*
+**/*.secrets.json

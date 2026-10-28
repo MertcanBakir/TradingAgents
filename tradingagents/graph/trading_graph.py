@@ -57,6 +57,8 @@ class TradingAgentsGraph:
         debug=False,
         config: dict[str, Any] = None,
         callbacks: list | None = None,
+        *,
+        update_global_config: bool = True,
     ):
         """Initialize the trading agents graph and components.
 
@@ -65,12 +67,17 @@ class TradingAgentsGraph:
             debug: Whether to run in debug mode
             config: Configuration dictionary. If None, uses default config
             callbacks: Optional list of callback handlers (e.g., for tracking LLM/tool stats)
+            update_global_config: Keep legacy process-wide configuration for CLI callers.
+                Headless service callers disable it and use run-scoped configuration.
         """
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
 
-        set_config(self.config)
+        # CLI compatibility remains the default. Headless workers bind their
+        # own run_config and must not mutate another caller's global defaults.
+        if update_global_config:
+            set_config(self.config)
 
         os.makedirs(self.config["data_cache_dir"], exist_ok=True)
         os.makedirs(self.config["results_dir"], exist_ok=True)
