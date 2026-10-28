@@ -18,6 +18,7 @@ local-data
 reports
 *.sqlite3*
 .pytest_cache
+test-results
 .ruff_cache
 private-config
 .private

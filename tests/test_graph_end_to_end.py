@@ -303,14 +303,17 @@ class LoopingModel(ScriptedModel):
 
 
 @pytest.mark.unit
-def test_an_analyst_that_keeps_calling_tools_writes_its_report_at_the_limit(tmp_path, monkeypatch, offline):
+@pytest.mark.parametrize("round_limit", [None, 3], ids=["configured-default", "3-rounds"])
+def test_an_analyst_that_keeps_calling_tools_writes_its_report_at_the_limit(tmp_path, monkeypatch, offline, round_limit):
     """A model that does not stop calling tools must not end the run (#1420)."""
     model = LoopingModel(structured=True)
-    graph = _graph(tmp_path, monkeypatch, model, max_tool_rounds=3)
+    config = {} if round_limit is None else {"max_tool_rounds": round_limit}
+    graph = _graph(tmp_path, monkeypatch, model, **config)
 
     final_state, rating = graph.propagate("NVDA", TRADE_DATE)
 
-    assert len(model.tool_turns) == 3 * 3   # three tool-using analysts, three rounds each
+    # Each of the three tool-using analysts must obey the active limit.
+    assert len(model.tool_turns) == 3 * graph.config["max_tool_rounds"]
     for key in ("market_report", "news_report", "fundamentals_report"):
         assert final_state[key] == TEXT
     assert rating == "Overweight"
@@ -355,15 +358,36 @@ class TimedModel(ScriptedModel):
         return result
 
 
-@pytest.mark.unit
-def test_past_decisions_settle_alongside_the_analysts(tmp_path, monkeypatch, offline):
+@pytest.fixture(params=[None, 5, 30], ids=["configured-default", "5-days", "30-days"])
+def settlement_window(request, monkeypatch):
+    """Generate an entry plus the configured number of later session closes.
+
+    The outcome becomes known on TRADE_DATE for every horizon. Freeze the clock
+    and filter requested ranges so neither wall time nor unused future bars can
+    make an incomplete window appear complete.
+    """
     from tradingagents.memory import settlement
 
+    config = {} if request.param is None else {"holding_period_days": request.param}
+    days = config.get("holding_period_days", DEFAULT_CONFIG["holding_period_days"])
+    dates = pd.bdate_range(end=TRADE_DATE, periods=days + 1)
+    closes = pd.Series([100.0 + i for i in range(len(dates))], index=dates)
+    decision_date = (dates[0] - pd.offsets.BDay(1)).strftime("%Y-%m-%d")
+
+    def get_closes(ticker, start, end):
+        return closes[(closes.index >= pd.Timestamp(start)) & (closes.index < pd.Timestamp(end))]
+
+    monkeypatch.setattr(settlement, "get_closes", get_closes)
+    monkeypatch.setattr(settlement, "_now", lambda: pd.Timestamp("2026-01-21", tz="UTC"))
+    return config, decision_date, closes
+
+
+@pytest.mark.unit
+def test_past_decisions_settle_alongside_the_analysts(tmp_path, monkeypatch, offline, settlement_window):
+    config, decision_date, _ = settlement_window
     model = TimedModel()
-    graph = _graph(tmp_path, monkeypatch, model)
-    graph.memory_log.store_decision("NVDA", "2025-12-31", "Rating: Buy\n\nBuy NVDA.")
-    closes = pd.Series([100.0 + i for i in range(10)], index=pd.bdate_range("2026-01-02", periods=10))
-    monkeypatch.setattr(settlement, "get_closes", lambda *a, **k: closes)
+    graph = _graph(tmp_path, monkeypatch, model, **config)
+    graph.memory_log.store_decision("NVDA", decision_date, "Rating: Buy\n\nBuy NVDA.")
 
     graph.propagate("NVDA", TRADE_DATE)
 
@@ -371,8 +395,10 @@ def test_past_decisions_settle_alongside_the_analysts(tmp_path, monkeypatch, off
     assert len(reflections) == 1                # settled once, inside the run
     analyst_turns = [c for c in model.seen if c[0] == "agent"]
     assert reflections[0][2] < max(c[3] for c in analyst_turns), "settled before the analysts, not alongside"
-    settled = next(e for e in graph.memory_log.load_entries() if e["date"] == "2025-12-31")
+    settled = next(e for e in graph.memory_log.load_entries() if e["date"] == decision_date)
     assert not settled["pending"]
+    assert settled["holding"] == f"{graph.config['holding_period_days']}d"
+    assert settled["resolved"] == TRADE_DATE
     lessons = graph.memory_log.get_past_context("NVDA", as_of=TRADE_DATE)
     assert lessons
     pm_prompt = next(c[1] for c in model.seen if c[0] == "Portfolio Manager")
@@ -399,14 +425,11 @@ def test_a_settlement_failure_is_noted_and_the_run_goes_on(tmp_path, monkeypatch
 
 
 @pytest.mark.unit
-def test_the_run_settles_other_tickers_due_decisions_too(tmp_path, monkeypatch, offline):
+def test_the_run_settles_other_tickers_due_decisions_too(tmp_path, monkeypatch, offline, settlement_window):
     """A ticker a scheduler stopped analysing still gets its decisions settled (#1445)."""
-    from tradingagents.memory import settlement
-
-    graph = _graph(tmp_path, monkeypatch, ScriptedModel(structured=True))
-    graph.memory_log.store_decision("MSFT", "2026-01-02", "Rating: Buy\n\nBuy MSFT.")
-    closes = pd.Series([100.0 + i for i in range(10)], index=pd.bdate_range("2026-01-02", periods=10))
-    monkeypatch.setattr(settlement, "get_closes", lambda *a, **k: closes)
+    config, decision_date, _ = settlement_window
+    graph = _graph(tmp_path, monkeypatch, ScriptedModel(structured=True), **config)
+    graph.memory_log.store_decision("MSFT", decision_date, "Rating: Buy\n\nBuy MSFT.")
 
     graph.propagate("NVDA", TRADE_DATE)
 
@@ -415,15 +438,12 @@ def test_the_run_settles_other_tickers_due_decisions_too(tmp_path, monkeypatch, 
 
 
 @pytest.mark.unit
-def test_the_memory_step_reads_lessons_as_of_the_trade_date_and_settles_once(tmp_path, monkeypatch, offline):
+def test_the_memory_step_reads_lessons_as_of_the_trade_date_and_settles_once(tmp_path, monkeypatch, offline, settlement_window):
     """A past-dated run reads only lessons known by its date (#1251); a resumed run
     that re-runs the step settles nothing twice."""
-    from tradingagents.memory import settlement
-
-    graph = _graph(tmp_path, monkeypatch, ScriptedModel(structured=True))
-    graph.memory_log.store_decision("NVDA", "2025-12-31", "Rating: Buy\n\nBuy NVDA.")
-    closes = pd.Series([100.0 + i for i in range(10)], index=pd.bdate_range("2026-01-02", periods=10))
-    monkeypatch.setattr(settlement, "get_closes", lambda *a, **k: closes)
+    config, decision_date, _ = settlement_window
+    graph = _graph(tmp_path, monkeypatch, ScriptedModel(structured=True), **config)
+    graph.memory_log.store_decision("NVDA", decision_date, "Rating: Buy\n\nBuy NVDA.")
     asked = []
     real = graph.memory_log.get_past_context
     monkeypatch.setattr(graph.memory_log, "get_past_context",
@@ -431,8 +451,47 @@ def test_the_memory_step_reads_lessons_as_of_the_trade_date_and_settles_once(tmp
     state = {"company_of_interest": "NVDA", "trade_date": "2026-01-20"}
 
     graph._memory_step(state)
+    assert not graph.memory_log.load_entries()[0]["pending"]
     log_after_first = (tmp_path / "log.md").read_text()
     graph._memory_step(state)
 
     assert asked == ["2026-01-20", "2026-01-20"]
     assert (tmp_path / "log.md").read_text() == log_after_first
+
+
+@pytest.mark.unit
+def test_decision_waits_for_the_full_configured_window(tmp_path, monkeypatch, settlement_window):
+    from tradingagents.memory import settlement
+
+    config, decision_date, closes = settlement_window
+    graph = _graph(tmp_path, monkeypatch, ScriptedModel(), **config)
+    graph.memory_log.store_decision("NVDA", decision_date, "Rating: Buy\n\nBuy NVDA.")
+    complete_prices = settlement.get_closes
+    # One close short: 30 intervals need 31 closes, including the entry.
+    monkeypatch.setattr(settlement, "get_closes", lambda *a, **k: closes.iloc[:-1])
+    result = graph.settle_all_pending()
+    assert not result.settled and not result.failed
+    assert graph.memory_log.load_entries()[0]["pending"]
+
+    monkeypatch.setattr(settlement, "get_closes", complete_prices)
+    result = graph.settle_all_pending()
+    assert result.settled == [("NVDA", decision_date)] and not result.failed
+    entry = graph.memory_log.load_entries()[0]
+    assert not entry["pending"]
+    assert entry["holding"] == f"{graph.config['holding_period_days']}d"
+    assert entry["resolved"] == TRADE_DATE
+    assert float(entry["raw"].rstrip("%")) == pytest.approx(graph.config["holding_period_days"])
+
+
+@pytest.mark.unit
+def test_configured_window_lessons_are_hidden_until_the_exit_date(tmp_path, monkeypatch, settlement_window):
+    config, decision_date, _ = settlement_window
+    graph = _graph(tmp_path, monkeypatch, ScriptedModel(), **config)
+    graph.memory_log.store_decision("NVDA", decision_date, "Rating: Buy\n\nBuy NVDA.")
+    before_exit = (pd.Timestamp(TRADE_DATE) - pd.offsets.BDay(1)).strftime("%Y-%m-%d")
+
+    earlier = graph._memory_step({"company_of_interest": "NVDA", "trade_date": before_exit})
+    assert earlier["past_context"] == ""
+    assert not graph.memory_log.load_entries()[0]["pending"]
+    on_exit = graph._memory_step({"company_of_interest": "NVDA", "trade_date": TRADE_DATE})
+    assert on_exit["past_context"]

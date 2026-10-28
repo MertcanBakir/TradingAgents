@@ -6,8 +6,10 @@ WORKDIR /build
 COPY . .
 RUN pip install --no-cache-dir -c constraints/worker.txt '.[backend]'
 
-FROM builder AS test
+FROM builder AS test-runner
 RUN pip install --no-cache-dir -c constraints/worker.txt '.[dev,backend]'
+
+FROM test-runner AS test
 RUN TRADINGAGENTS_NO_UPDATE_CHECK=1 python -m pytest -p no:cacheprovider -q --tb=short
 
 FROM python:3.13-slim

@@ -175,18 +175,25 @@ def test_request_error_message_carries_no_key(monkeypatch):
 
 
 @pytest.mark.unit
-def test_global_news_omitted_optionals_use_the_configured_defaults(monkeypatch):
+@pytest.mark.parametrize("use_defaults", [True, False], ids=["configured-default", "custom"])
+def test_global_news_omitted_optionals_use_the_configured_defaults(monkeypatch, use_defaults):
     """The tool passes None for an omitted look_back_days or limit (#1326)."""
-    from tradingagents.dataflows.vendors.alpha_vantage import news as alpha_vantage_news
+    from datetime import datetime, timedelta
 
-    monkeypatch.setattr(alpha_vantage_news, "get_config",
-                        lambda: {"global_news_lookback_days": 3, "global_news_article_limit": 9})
+    from tradingagents.dataflows.vendors.alpha_vantage import news as alpha_vantage_news
+    from tradingagents.default_config import DEFAULT_CONFIG
+
+    config = DEFAULT_CONFIG if use_defaults else {"global_news_lookback_days": 3, "global_news_article_limit": 9}
+    monkeypatch.setattr(alpha_vantage_news, "get_config", lambda: config)
     seen = {}
     monkeypatch.setattr(alpha_vantage_news, "_make_api_request", lambda fn, params: seen.update(params) or "{}")
 
     alpha_vantage_news.get_global_news("2026-08-14", None, None)
 
-    assert seen["time_from"].startswith("20260811") and seen["limit"] == "9"
+    expected_start = datetime(2026, 8, 14) - timedelta(days=config["global_news_lookback_days"])
+    assert seen["time_from"] == expected_start.strftime("%Y%m%dT0000")
+    assert seen["time_to"] == "20260814T2359"
+    assert seen["limit"] == str(config["global_news_article_limit"])
 
 
 @pytest.mark.unit
@@ -219,16 +226,19 @@ def test_an_indicator_this_vendor_lacks_lets_the_next_one_serve_it(indicator):
 
 
 @pytest.mark.unit
-def test_ticker_news_asks_for_only_as_many_articles_as_configured(monkeypatch):
+@pytest.mark.parametrize("use_defaults", [True, False], ids=["configured-default", "custom"])
+def test_ticker_news_asks_for_only_as_many_articles_as_configured(monkeypatch, use_defaults):
     """The endpoint returns 50 articles with per-article sentiment arrays by
     default, and the whole payload went into the prompt."""
     from tradingagents.dataflows.vendors.alpha_vantage import news as alpha_vantage_news
+    from tradingagents.default_config import DEFAULT_CONFIG
 
-    monkeypatch.setattr(alpha_vantage_news, "get_config", lambda: {"news_article_limit": 8})
+    config = DEFAULT_CONFIG if use_defaults else {"news_article_limit": 8}
+    monkeypatch.setattr(alpha_vantage_news, "get_config", lambda: config)
     seen = {}
     monkeypatch.setattr(alpha_vantage_news, "_make_api_request",
                         lambda fn, params: seen.update(params) or "{}")
 
     alpha_vantage_news.get_news("AAPL", "2026-03-10", "2026-03-14")
 
-    assert seen["limit"] == "8"
+    assert seen["limit"] == str(config["news_article_limit"])
