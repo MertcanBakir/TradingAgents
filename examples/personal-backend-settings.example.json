@@ -1,0 +1,15 @@
+{
+  "database_url": "postgresql://REPLACE_USER:REPLACE_PASSWORD@REPLACE_HOST:5432/postgres?sslmode=verify-full",
+  "supabase_url": "https://REPLACE_PROJECT.supabase.co",
+  "supabase_publishable_key": "REPLACE_PUBLISHABLE_KEY",
+  "supabase_service_key": "REPLACE_SERVER_ONLY_SERVICE_KEY",
+  "encryption_keys": {"v1": "REPLACE_WITH_BASE64_32_RANDOM_BYTES"},
+  "active_encryption_key": "v1",
+  "personal_user_id": "00000000-0000-4000-8000-000000000001",
+  "personal_chatgpt_enabled": true,
+  "personal_chatgpt_auth_file": "/run/chatgpt/chatgpt-auth.json",
+  "allowed_models": {"chatgpt": ["REPLACE_WITH_AVAILABLE_CHATGPT_MODEL"]},
+  "hard_timeout_seconds": 2100,
+  "lease_seconds": 120,
+  "daily_analysis_limit": 10
+}

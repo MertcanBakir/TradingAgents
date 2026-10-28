@@ -1,0 +1,4 @@
+{$LUCRARI_DOMAIN} {
+    reverse_proxy api:8000
+    # Do not enable request/access logs: URLs and headers may be sensitive.
+}
