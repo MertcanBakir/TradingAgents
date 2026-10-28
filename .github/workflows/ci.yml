@@ -4,6 +4,10 @@ on:
   push:
     branches: [main, 'v[0-9]+.[0-9]+.[0-9]+']
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -13,10 +17,12 @@ jobs:
   test:
     name: tests (py${{ matrix.python-version }}${{ matrix.tz && format(', {0}', matrix.tz) || '' }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
+        tz: [UTC]
         # One run away from UTC, so a test that only passes in UTC fails here.
         include:
           - python-version: "3.12"
@@ -24,23 +30,33 @@ jobs:
     env:
       TZ: ${{ matrix.tz }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install (with dev extras)
+      - name: Install (with dev and backend extras)
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,backend]"
+          python -m pip check
       - name: Run test suite
-        run: pytest -q
+        run: python -m pytest -q --junitxml=test-results/junit.xml
+      - name: Upload test report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pytest-py${{ matrix.python-version }}-${{ matrix.tz == 'America/New_York' && 'new-york' || 'utc' }}
+          path: test-results/junit.xml
+          retention-days: 14
+          if-no-files-found: warn
 
   smoke-install:
     name: clean-install smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - name: Fresh install (no dev extras) and import
@@ -54,9 +70,10 @@ jobs:
   lint:
     name: ruff (strict, full repo)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - name: Install ruff
@@ -65,3 +82,68 @@ jobs:
         # The repo is fully clean under the strict select, so we lint everything
         # (generated results/ is excluded via pyproject extend-exclude).
         run: ruff check .
+
+  worker-image:
+    name: production image (ARM64)
+    # Match the EC2 architecture without emulation. No AWS access or registry push.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build the worker test runner with pinned Python 3.13 dependencies
+        run: |
+          docker build --platform linux/arm64 --file Dockerfile.worker \
+            --target test-runner --tag tradingagents-worker-tests:ci .
+      - name: Run tests in the ARM64 worker environment
+        run: |
+          docker run --name worker-ci-tests --platform linux/arm64 --network none \
+            --entrypoint python tradingagents-worker-tests:ci \
+            -m pytest -p no:cacheprovider -q --tb=short --junitxml=/tmp/junit-worker-arm64.xml
+      - name: Collect ARM64 test report
+        if: ${{ always() }}
+        run: |
+          mkdir -p test-results
+          if docker container inspect worker-ci-tests >/dev/null 2>&1; then
+            trap 'docker rm -f worker-ci-tests >/dev/null 2>&1 || true' EXIT
+            docker cp worker-ci-tests:/tmp/junit-worker-arm64.xml test-results/junit-worker-arm64.xml
+          fi
+      - name: Upload ARM64 test report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pytest-worker-arm64-py3.13
+          path: test-results/junit-worker-arm64.xml
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Build the production image
+        run: |
+          docker build --platform linux/arm64 --file Dockerfile.worker \
+            --tag tradingagents-worker:ci .
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' tradingagents-worker:ci)" = "linux/arm64"
+      - name: Smoke test the packaged API with production restrictions
+        # Fake settings only; no network, real session, database or AWS credentials.
+        run: |
+          docker run --rm --platform linux/arm64 \
+            --read-only --network none --cap-drop ALL \
+            --security-opt no-new-privileges --pids-limit 256 \
+            --tmpfs /tmp:rw,nosuid,nodev,size=256m,mode=1777 \
+            --mount "type=bind,source=${GITHUB_WORKSPACE}/deploy/personal/container_smoke.py,target=/tmp/container_smoke.py,readonly" \
+            --entrypoint python tradingagents-worker:ci /tmp/container_smoke.py
+
+  ci-passed:
+    name: CI passed
+    if: ${{ always() }}
+    needs: [test, smoke-install, lint, worker-image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every check to succeed
+        env:
+          CHECK_RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $CHECK_RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "CI failed: at least one required job failed, was cancelled or was skipped."
+              exit 1
+            fi
+          done

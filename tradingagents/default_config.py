@@ -134,13 +134,13 @@ def build_default_config() -> dict:
         "max_risk_discuss_rounds": 1,
         "max_recur_limit": 100,
         # Rounds of tool calls an analyst may make before it is asked for its report.
-        "max_tool_rounds": 20,
+        "max_tool_rounds": 10,
         # News / data fetching parameters
         # Increase for longer lookback strategies or to broaden macro coverage;
         # decrease to reduce token usage in agent prompts.
-        "news_article_limit": 20,             # max articles per ticker (ticker-news)
+        "news_article_limit": 12,             # max articles per ticker (ticker-news)
         "global_news_article_limit": 10,      # max articles for global/macro news
-        "global_news_lookback_days": 7,       # macro news lookback window
+        "global_news_lookback_days": 30,       # macro news lookback window
         # Search queries used by get_global_news for macro headlines. Extend or
         # replace to broaden geographic / sector coverage.
         "global_news_queries": [
@@ -177,7 +177,7 @@ def build_default_config() -> dict:
         # while non-US tickers get their regional index automatically.
         # Trading days from the first close after the analysis date over which a
         # decision's outcome is measured, for reflection and for the backtest figures.
-        "holding_period_days": 5,
+        "holding_period_days": 30,
         "benchmark_ticker": None,
         "benchmark_map": {
             ".NS":  "^NSEI",       # NSE India (Nifty 50)
