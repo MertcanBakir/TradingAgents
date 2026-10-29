@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "canonical_source": "FinBot/supabase/migrations",
+  "baseline": [
+    {
+      "file": "20261019000000_analysis_backend.sql",
+      "sha256": "cfeb3abff994f3723b284adfb9cf0d3229d6e6ea1789f1a0352782938598cba4"
+    },
+    {
+      "file": "20261022000000_personal_analysis_auth.sql",
+      "sha256": "41cc7d7857728c7c0b4e90398f1cb19127b9ea8f2bfa3915b2d8b81c06350893"
+    },
+    {
+      "file": "20261024000000_dynamic_chatgpt_model_catalog.sql",
+      "sha256": "5cb98ac22540ab2a2a5ff12be31f3ac2ac6c5a7c4c9b8a24869fa77a1c0b9c68"
+    }
+  ],
+  "migrations": []
+}

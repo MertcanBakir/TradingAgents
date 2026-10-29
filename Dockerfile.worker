@@ -20,4 +20,7 @@ RUN useradd --create-home appuser && install -d -m 0700 -o appuser -g appuser /d
 USER appuser
 WORKDIR /home/appuser/app
 COPY --from=builder --chown=appuser:appuser /build/examples ./examples
+COPY --from=builder /build/deploy/migrations /opt/finbot-migrations
+COPY --from=builder /build/deploy/personal/migrate.py /opt/finbot-migrations/runner.py
+RUN python /opt/finbot-migrations/runner.py --validate
 ENTRYPOINT ["python", "-m", "tradingagents.service.cli"]

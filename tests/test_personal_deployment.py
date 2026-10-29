@@ -126,6 +126,8 @@ class Docker:
         self.architecture = "arm64"
         self.revision = SHA
         self.ticks = 0
+        self.migrations = []
+        self.migration_failure = None
 
     def clock(self):
         self.ticks += 1
@@ -146,7 +148,19 @@ class Docker:
                 "Config": {"Labels": {"org.opencontainers.image.revision": self.revision}}}])
         if args[:2] == ["docker", "inspect"]:
             name = args[2]
-            return json.dumps([{"Id": name, "Config": {"Image": self.image}, "State": {"Status": "running"}}])
+            return json.dumps([{"Id": name, "Config": {"Image": self.image,
+                "Env": ["LUCRARI_BACKEND_SETTINGS_FILE=/run/private/settings.json"]}, "State": {"Status": "running"}}])
+        if args[:2] == ["docker", "run"]:
+            assert args[-2] == "/opt/finbot-migrations/runner.py"
+            assert args[args.index("--volumes-from") + 1] == "api:ro"
+            assert "--read-only" in args and "ALL" in args
+            self.migrations.append(args[-1])
+            if self.migration_failure == args[-1]:
+                raise host.DeploymentError("Migration failed")
+            # The original services and configuration still run during migrations.
+            assert self.image == host.image_setting((self.root / ".env").read_text())
+            return json.dumps({"status": "migrated" if args[-1] == "--apply" else "checked",
+                               "baseline_verified": 3, "pending": [], "applied": 0})
         if args[:2] == ["docker", "exec"]:
             bad = self.image == NEW and self.bad_catalog
             stale = self.image == NEW and self.stale_catalog
@@ -189,6 +203,7 @@ def test_deploy_preserves_private_settings_permissions_and_caddy(deployment):
     assert len(backups) == 1 and backups[0].read_text() == original
     assert stat.S_IMODE(backups[0].stat().st_mode) == 0o600
     assert docker.updates == [NEW]
+    assert docker.migrations == ["--check", "--apply"]
     assert deploy.container("edge")["Id"] == "edge"
 
 
@@ -268,6 +283,24 @@ def test_repeated_deploy_is_a_verified_noop(deployment):
     assert len(list(env.parent.joinpath("backups").glob("*.env"))) == 1
 
 
+@pytest.mark.parametrize("action", ["--check", "--apply"])
+def test_migration_failure_never_recreates_services_or_changes_env(deployment, action):
+    deploy, docker, env, original = deployment
+    docker.migration_failure = action
+    with pytest.raises(host.DeploymentError, match="Migration failed"):
+        deploy.deploy(DIGEST, SHA)
+    assert env.read_text() == original and docker.updates == []
+
+
+def test_image_rollback_does_not_reverse_successful_migrations(deployment):
+    deploy, docker, _, _ = deployment
+    docker.bad_catalog = True
+    with pytest.raises(host.DeploymentError, match="previous image restored"):
+        deploy.deploy(DIGEST, SHA)
+    assert docker.migrations == ["--check", "--apply"]
+    assert docker.updates == [NEW, OLD]
+
+
 def test_subprocess_failures_never_expose_private_output(tmp_path, monkeypatch):
     def failure(*args, **kwargs):
         return subprocess.CompletedProcess([], 1, "FAKE_SECRET", "FAKE_SECRET")
@@ -300,3 +333,23 @@ def test_ssm_arguments_cannot_inject_shell_commands():
     for values in [(DIGEST + ";id", SHA, "c" * 64), (DIGEST, SHA + "'", "c" * 64)]:
         with pytest.raises(ValueError):
             deploy_request.parameters(*values)
+
+
+@pytest.mark.parametrize("versioned", [False, True])
+def test_ssm_document_selects_hash_verified_legacy_or_versioned_helper(tmp_path, versioned):
+    document = json.loads((Path(__file__).resolve().parents[1] / "deploy/personal/ssm-deploy.json").read_text())
+    script = "\n".join(document["mainSteps"][0]["inputs"]["runCommand"])
+    script = script.replace("/usr/local/libexec/finbot-tradingagents", str(tmp_path))
+    code = b"import json,sys; print(json.dumps(sys.argv[1:]))\n"
+    digest = hashlib.sha256(code).hexdigest()
+    target = tmp_path / "versions" / (digest + ".py") if versioned else tmp_path / "deploy.py"
+    target.parent.mkdir(exist_ok=True)
+    target.write_bytes(code)
+    for name, value in (("ScriptSha256", digest), ("ImageDigest", DIGEST), ("CommitSha", SHA)):
+        script = script.replace("{{ " + name + " }}", value)
+    result = subprocess.run(["sh", "-c", script], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert json.loads(result.stdout) == ["--digest", DIGEST, "--commit", SHA]
+    target.write_bytes(code + b"# tampered\n")
+    rejected = subprocess.run(["sh", "-c", script], capture_output=True, text=True)
+    assert rejected.returncode != 0 and not rejected.stdout

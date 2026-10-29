@@ -120,6 +120,27 @@ class Deployment:
                 or (info["Config"].get("Labels") or {}).get("org.opencontainers.image.revision") != commit):
             raise DeploymentError("Image architecture or source revision mismatch")
 
+    def migrate(self, image, *, apply=False):
+        api = self.container("api")
+        settings = "LUCRARI_BACKEND_SETTINGS_FILE=/run/private/settings.json"
+        if settings not in api["Config"].get("Env", []):
+            raise DeploymentError("Unexpected API settings mount configuration")
+        # Reuse only API's existing settings/CA mounts, never worker's session.
+        # Credentials remain on the host. The tested image supplies all SQL/code.
+        raw = self.run(["docker", "run", "--rm", "--read-only", "--cap-drop", "ALL",
+                        "--security-opt", "no-new-privileges", "--pids-limit", "256",
+                        "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777",
+                        "--volumes-from", api["Id"] + ":ro", "--env", settings,
+                        "--entrypoint", "python", image, "/opt/finbot-migrations/runner.py",
+                        "--apply" if apply else "--check"])
+        try:
+            result = json.loads(raw)
+            if result["status"] != ("migrated" if apply else "checked") or result["baseline_verified"] != 3:
+                raise ValueError
+        except (ValueError, KeyError, TypeError):
+            raise DeploymentError("Migration runner did not confirm success") from None
+        return result
+
     def verify(self, image, edge_id, refreshed_after):
         end = self.clock() + self.config.get("health_timeout", 180)
         stable = 0
@@ -160,12 +181,15 @@ class Deployment:
             raise DeploymentError("Database preflight failed")
         if previous == image:
             self.verify_image(image, commit)
+            self.migrate(image)
+            migrations = self.migrate(image, apply=True)
             self.verify(image, edge, 0)
-            return {"status": "already_current", "image": image}
+            return {"status": "already_current", "image": image, "migrations": migrations}
         password = self.run(["aws", "ecr", "get-login-password", "--region", "eu-west-1"])
         self.run(["docker", "login", "--username", "AWS", "--password-stdin", REPOSITORY.split("/")[0]], input_text=password)
         self.run(["docker", "pull", image])
         self.verify_image(image, commit)
+        self.migrate(image)
         backup_dir = Path(self.config["backup_directory"])
         backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         if backup_dir.is_symlink() or stat.S_IMODE(backup_dir.stat().st_mode) & 0o077:
@@ -176,6 +200,9 @@ class Deployment:
             stream.write(previous_text)
             stream.flush()
             os.fsync(stream.fileno())
+        # A failed migration stops BEFORE .env changes or container recreation.
+        # Successful additive schema changes stay applied during image rollback.
+        migrations = self.migrate(image, apply=True)
         try:
             atomic_env(self.env_path, update_image(previous_text, image))
             self.run([*self.compose, "up", "--detach", "--no-deps", "--no-build", "--force-recreate", *SERVICES])
@@ -189,7 +216,8 @@ class Deployment:
                 raise DeploymentError("Deployment and rollback failed; private backup retained") from None
             raise DeploymentError("Deployment failed; previous image restored and verified") from None
         return {"status": "deployed", "image": image, "commit": commit,
-                "previous_image": previous, "active_jobs_before": before["active_jobs"]}
+                "previous_image": previous, "active_jobs_before": before["active_jobs"],
+                "migrations": migrations}
 
 
 def main():

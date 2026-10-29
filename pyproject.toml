@@ -36,6 +36,7 @@ backend = [
     "fastapi>=0.115,<1",
     "uvicorn>=0.30,<1",
     "psycopg[binary]>=3.2,<4",
+    "pglast>=8.7,<9",
     "httpx>=0.28,<1",
     "pandas-market-calendars>=5,<6",
 ]
