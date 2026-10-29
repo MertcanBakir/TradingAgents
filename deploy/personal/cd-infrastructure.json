@@ -1,0 +1,88 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "FinBot TradingAgents GitHub OIDC roles; no EC2 replacement or runtime deployment.",
+  "Parameters": {
+    "OidcSubjectPrefix": {
+      "Type": "String",
+      "Default": "repo:MertcanBakir@151876718/TradingAgents@1436778428",
+      "Description": "Verified immutable subject prefix of this GitHub repository."
+    }
+  },
+  "Resources": {
+    "GitHubOidc": {
+      "Type": "AWS::IAM::OIDCProvider",
+      "Properties": {
+        "Url": "https://token.actions.githubusercontent.com",
+        "ClientIdList": ["sts.amazonaws.com"],
+        "Tags": [{"Key": "Project", "Value": "FinBot"}]
+      }
+    },
+    "PublishRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "FinBotTradingAgentsGitHubPublishRole",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": {"Federated": {"Ref": "GitHubOidc"}},
+            "Action": "sts:AssumeRoleWithWebIdentity",
+            "Condition": {"StringEquals": {
+              "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+              "token.actions.githubusercontent.com:sub": {"Fn::Sub": "${OidcSubjectPrefix}:environment:image-publish"}
+            }}
+          }]
+        },
+        "Policies": [{
+          "PolicyName": "PublishOnlyTradingAgentsImages",
+          "PolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {"Effect": "Allow", "Action": "ecr:GetAuthorizationToken", "Resource": "*"},
+              {"Effect": "Allow", "Action": [
+                "ecr:BatchCheckLayerAvailability", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart",
+                "ecr:CompleteLayerUpload", "ecr:PutImage", "ecr:DescribeImages", "ecr:BatchGetImage"
+              ], "Resource": {"Fn::Sub": "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/lucrari/tradingagents-personal"}}
+            ]
+          }
+        }]
+      }
+    },
+    "DeployRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "FinBotTradingAgentsGitHubDeployRole",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": {"Federated": {"Ref": "GitHubOidc"}},
+            "Action": "sts:AssumeRoleWithWebIdentity",
+            "Condition": {"StringEquals": {
+              "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+              "token.actions.githubusercontent.com:sub": {"Fn::Sub": "${OidcSubjectPrefix}:environment:production"}
+            }}
+          }]
+        },
+        "Policies": [{
+          "PolicyName": "DeployOnlyTradingAgentsInstance",
+          "PolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {"Effect": "Allow", "Action": "ssm:SendCommand", "Resource": [
+                {"Fn::Sub": "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:document/FinBotDeployTradingAgents"},
+                {"Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-0cc2d47020ed7347c"}
+              ]},
+              {"Effect": "Allow", "Action": "ssm:GetCommandInvocation", "Resource": "*"}
+            ]
+          }
+        }]
+      }
+    }
+  },
+  "Outputs": {
+    "PublishRoleArn": {"Value": {"Fn::GetAtt": ["PublishRole", "Arn"]}},
+    "DeployRoleArn": {"Value": {"Fn::GetAtt": ["DeployRole", "Arn"]}},
+    "OidcProviderArn": {"Value": {"Ref": "GitHubOidc"}}
+  }
+}

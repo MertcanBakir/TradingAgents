@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "2.2",
+  "description": "Deploy a verified FinBot ARM64 image using the root-owned helper; no arbitrary shell commands.",
+  "parameters": {
+    "ImageDigest": {"type": "String", "allowedPattern": "^sha256:[0-9a-f]{64}$"},
+    "CommitSha": {"type": "String", "allowedPattern": "^[0-9a-f]{40}$"},
+    "ScriptSha256": {"type": "String", "allowedPattern": "^[0-9a-f]{64}$"}
+  },
+  "mainSteps": [{
+    "action": "aws:runShellScript",
+    "name": "DeployBackend",
+    "inputs": {
+      "timeoutSeconds": "900",
+      "runCommand": [
+        "set -eu",
+        "test \"$(sha256sum /usr/local/libexec/finbot-tradingagents/deploy.py | cut -d ' ' -f 1)\" = '{{ ScriptSha256 }}'",
+        "exec python3 /usr/local/libexec/finbot-tradingagents/deploy.py --digest '{{ ImageDigest }}' --commit '{{ CommitSha }}'"
+      ]
+    }
+  }]
+}

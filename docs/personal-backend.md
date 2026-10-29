@@ -125,6 +125,10 @@ metadata from PostgreSQL.
 
 ## Deployment packaging (not executed automatically)
 
+The optional [CD pipeline](../deploy/personal/CD.md) documents image handoff,
+GitHub OIDC, restricted SSM deployment and rollback. Live deployment remains
+disabled until explicitly enabled after first-release approval.
+
 `compose.personal.yml` runs API, worker, maintenance and Caddy HTTPS on one EC2.
 Set `LUCRARI_IMAGE` to a versioned ECR image/tag (prefer a digest),
 `LUCRARI_PRIVATE_DIR` to your protected host directory and `LUCRARI_DOMAIN` to
