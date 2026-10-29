@@ -19,6 +19,9 @@ separate [opt-in CD pipeline](CD.md); CI itself never requests AWS credentials.
   `container_smoke.py` as its non-root user with a read-only filesystem and no
   external network. Checks API startup, `/healthz`, unauthenticated route denial,
   and session initialization using fabricated configuration.
+- **database migration acceptance (PostgreSQL 17)**: validates the image migration
+  manifest and exercises real transactional delivery against disposable loopback
+  databases with minimal Supabase platform stubs. See [MIGRATIONS.md](MIGRATIONS.md).
 - **CI passed**: succeeds only when every required job succeeds. This is the
   stable check name to require in the GitHub `main` branch rules.
 
@@ -71,6 +74,7 @@ GitHub uses the native `ubuntu-24.04-arm` runner.
 `not integration` selection. It requires local PostgreSQL binaries and the
 separate FinBot repository's complete canonical migration chain and SQL acceptance
 files. The three migration copies in `deploy/migrations/` are not a standalone
-replacement for that chain. Database integration coverage needs a separate setup;
-this workflow does not claim to validate real PostgreSQL migrations or live
-Supabase behavior.
+replacement for that chain. That full FinBot integration suite still needs a separate setup. The required
+migration acceptance job independently tests the three SQL copies and the new
+delivery runner on real PostgreSQL with minimal platform stubs; it does not
+claim full FinBot or live managed Supabase coverage.

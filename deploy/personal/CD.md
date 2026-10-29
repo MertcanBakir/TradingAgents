@@ -65,7 +65,9 @@ The helper is root-owned at
 `/etc/finbot-tradingagents/cd-config.json`. It supports the host's Python 3.9
 without installing Python packages. The SSM document checks the helper's SHA-256
 against the version in the workflow checkout before running it. Updating helper
-code therefore requires a reviewed host installation as well as merging the code.
+code therefore requires a reviewed, versioned host installation as well as merging the code.
+The SSM document selects `versions/<SHA256>.py` and verifies its hash, with a
+hash-checked fallback to the original helper for older CD runs.
 
 Non-secret host configuration:
 
@@ -86,7 +88,10 @@ The helper:
   refuses to silently overwrite an inconsistent host configuration.
 - Pulls the new image using the instance role and temporary Docker login storage.
   Verifies ARM64 architecture and the baked source revision before changing `.env`.
-- Writes a private `.env` backup, preserves ownership/permissions and atomically
+- Checks the image-packaged migration manifest/history read-only, then creates a
+  private `.env` backup and applies the compatible migration batch transactionally.
+  A migration failure stops before any container restart or image change.
+- Preserves ownership/permissions and atomically
   changes only `LUCRARI_IMAGE` in the original configuration.
 - Recreates only `api`, `worker`, `maintenance` with `--no-deps --no-build`.
   It does not replace the server's Compose file, Caddyfile, Caddy container or
@@ -125,8 +130,9 @@ runner timeout, inspect that SSM invocation before retrying: its server command
 may still be running. A nonzero SSM command remains a failure; never suppress it
 to make a workflow appear green.
 
-No database migrations or automatic schema rollback are included. The old and
-new images must work with the already-applied database schema. New migrations
-need a separate plan using the canonical FinBot migration chain. Historical
-image and private-backup retention, EBS snapshots and disaster recovery are
-separate operational tasks; this pipeline does not prune rollback images.
+Database delivery is described in [MIGRATIONS.md](MIGRATIONS.md). Only reviewed
+additive SQL in the tested image is applied, before service recreation. Historical
+migrations are verified and never replayed. Successful schema changes remain
+applied if the image rolls back; there is no automatic schema downgrade.
+Historical image and private-backup retention, EBS snapshots and disaster recovery
+are separate operational tasks; this pipeline does not prune rollback images.

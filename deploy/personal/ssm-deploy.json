@@ -13,8 +13,10 @@
       "timeoutSeconds": "900",
       "runCommand": [
         "set -eu",
-        "test \"$(sha256sum /usr/local/libexec/finbot-tradingagents/deploy.py | cut -d ' ' -f 1)\" = '{{ ScriptSha256 }}'",
-        "exec python3 /usr/local/libexec/finbot-tradingagents/deploy.py --digest '{{ ImageDigest }}' --commit '{{ CommitSha }}'"
+        "helper=/usr/local/libexec/finbot-tradingagents/versions/{{ ScriptSha256 }}.py",
+        "if [ ! -f \"$helper\" ]; then helper=/usr/local/libexec/finbot-tradingagents/deploy.py; fi",
+        "test \"$(sha256sum \"$helper\" | cut -d ' ' -f 1)\" = '{{ ScriptSha256 }}'",
+        "exec python3 \"$helper\" --digest '{{ ImageDigest }}' --commit '{{ CommitSha }}'"
       ]
     }
   }]
