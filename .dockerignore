@@ -19,6 +19,7 @@ reports
 *.sqlite3*
 .pytest_cache
 test-results
+runtime-image
 .ruff_cache
 private-config
 .private

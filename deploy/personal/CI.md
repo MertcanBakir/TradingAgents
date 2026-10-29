@@ -3,6 +3,8 @@
 `.github/workflows/ci.yml` runs for pull requests, pushes to `main` and version
 branches, and manual dispatches. It does not publish images or deploy to AWS.
 It needs no repository secrets, AWS credentials, Supabase project or ChatGPT session.
+Successful main pushes additionally export the tested runtime image for the
+separate [opt-in CD pipeline](CD.md); CI itself never requests AWS credentials.
 
 ## Checks
 
