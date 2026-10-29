@@ -70,6 +70,8 @@ def test_only_new_explicitly_compatible_migrations_are_pending(tmp_path):
     "SELECT pg_sleep(999);", "", "-- comment only", "THIS IS NOT SQL;",
     "COMMENT ON TABLE public.instruments IS 'other project';",
     "ALTER TABLE analysis_backend.jobs ADD COLUMN IF NOT EXISTS note text;",
+    "ALTER TABLE analysis_backend.jobs ADD COLUMN sequence_id SERIAL;",
+    "ALTER TABLE analysis_backend.jobs ADD COLUMN sequence_id BIGSERIAL;",
     "CREATE TABLE analysis_backend.extra () INHERITS (analysis_backend.jobs);",
 ])
 def test_nonadditive_nontransactional_or_embedded_commit_is_rejected(sql):

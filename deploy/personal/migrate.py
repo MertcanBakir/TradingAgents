@@ -75,6 +75,10 @@ def expanding_statement(node):
             or (cmd.subtype == AlterTableType.AT_AddColumn
                 and not cmd.missing_ok and isinstance(cmd.def_, ast.ColumnDef)
                 and not cmd.def_.constraints and not cmd.def_.is_not_null
+                # SERIAL expands into NOT NULL + nextval() even without a
+                # ColumnDef constraint/default in the raw parse tree.
+                and cmd.def_.typeName.names[-1].sval.lower() not in {
+                    "serial", "smallserial", "bigserial", "serial2", "serial4", "serial8"}
                 and cmd.def_.identity in (None, "", "\u0000")
                 and cmd.def_.generated in (None, "", "\u0000"))
             for cmd in node.cmds
