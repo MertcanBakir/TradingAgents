@@ -13,6 +13,7 @@ FROM test-runner AS test
 RUN TRADINGAGENTS_NO_UPDATE_CHECK=1 python -m pytest -p no:cacheprovider -q --tb=short
 
 FROM python:3.13-slim
+LABEL io.finbot.backend-schema="2"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TRADINGAGENTS_NO_UPDATE_CHECK=1
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
@@ -23,4 +24,5 @@ COPY --from=builder --chown=appuser:appuser /build/examples ./examples
 COPY --from=builder /build/deploy/migrations /opt/finbot-migrations
 COPY --from=builder /build/deploy/personal/migrate.py /opt/finbot-migrations/runner.py
 RUN python /opt/finbot-migrations/runner.py --validate
+COPY --from=builder /build/deploy/transitions /opt/finbot-transitions
 ENTRYPOINT ["python", "-m", "tradingagents.service.cli"]

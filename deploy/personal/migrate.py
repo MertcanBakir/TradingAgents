@@ -106,6 +106,8 @@ def load(directory):
     manifest = json.loads((directory / "manifest.json").read_text())
     if manifest.get("format") != 1 or not isinstance(manifest.get("migrations"), list):
         raise ValueError("Invalid migration manifest")
+    if "backend_schema" in manifest and (type(manifest["backend_schema"]) is not int or manifest["backend_schema"] != 2):
+        raise ValueError("Unsupported backend schema requirement")
     entries = manifest.get("baseline", [])
     if {e["file"]: e["sha256"] for e in entries} != BASELINE or len(entries) != len(BASELINE):
         raise ValueError("Historical baseline is immutable")
@@ -203,6 +205,15 @@ def run(conn, migrations, *, apply=False):
                 "pending": [m.version for m in pending], "applied": len(pending) if apply else 0}
 
 
+def require_backend_schema(conn, revision):
+    if revision != 2:
+        raise ValueError("Unsupported backend schema requirement")
+    if not conn.execute("SELECT to_regclass('analysis_backend.schema_revision')").fetchone()[0]:
+        raise ValueError("Manual backend schema v2 transition required")
+    if conn.execute("SELECT revision FROM analysis_backend.schema_revision WHERE singleton").fetchone() != (revision,):
+        raise ValueError("Backend schema revision mismatch")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, default=Path(__file__).resolve().parent)
@@ -222,6 +233,9 @@ def main():
         if info.get("host") not in {"localhost", "127.0.0.1", "::1"} and info.get("sslmode") != "verify-full":
             raise ValueError("Verified database TLS required")
         with psycopg.connect(dsn, autocommit=True, connect_timeout=10, prepare_threshold=None) as conn:
+            revision = json.loads((args.directory / "manifest.json").read_text()).get("backend_schema")
+            if revision is not None:
+                require_backend_schema(conn, revision)
             print(json.dumps(run(conn, migrations, apply=args.apply)))
     except Exception:
         # SQL diagnostics, DSNs and settings can contain private information.

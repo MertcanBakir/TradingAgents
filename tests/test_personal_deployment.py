@@ -126,6 +126,9 @@ class Docker:
         self.architecture = "arm64"
         self.revision = SHA
         self.ticks = 0
+        self.schema_revision = 1
+        self.image_schema = None
+        self.previous_schema = "1"
         self.migrations = []
         self.migration_failure = None
 
@@ -145,7 +148,8 @@ class Docker:
             return ""
         if args[:3] == ["docker", "image", "inspect"]:
             return json.dumps([{"Os": "linux", "Architecture": self.architecture,
-                "Config": {"Labels": {"org.opencontainers.image.revision": self.revision}}}])
+                "Config": {"Labels": {"org.opencontainers.image.revision": self.revision,
+                    "io.finbot.backend-schema": self.previous_schema if args[-1] == OLD else self.image_schema}}}])
         if args[:2] == ["docker", "inspect"]:
             name = args[2]
             return json.dumps([{"Id": name, "Config": {"Image": self.image,
@@ -165,7 +169,7 @@ class Docker:
             bad = self.image == NEW and self.bad_catalog
             stale = self.image == NEW and self.stale_catalog
             return json.dumps({"ok": True, "clock": 100, "refreshed": 90 if stale else 101,
-                               "models": 0 if bad else 7, "active_jobs": 1})
+                               "models": 0 if bad else 7, "active_jobs": 1, "schema_revision": self.schema_revision})
         if args[:2] == ["docker", "compose"]:
             if "ps" in args:
                 return args[-1]
@@ -353,3 +357,33 @@ def test_ssm_document_selects_hash_verified_legacy_or_versioned_helper(tmp_path,
     target.write_bytes(code + b"# tampered\n")
     rejected = subprocess.run(["sh", "-c", script], capture_output=True, text=True)
     assert rejected.returncode != 0 and not rejected.stdout
+
+
+
+def test_v2_schema_cannot_roll_back_to_legacy_image(deployment):
+    deploy,docker,env,_=deployment
+    docker.schema_revision=2
+    docker.image_schema="2"
+    docker.bad_catalog=True
+    with pytest.raises(host.DeploymentError,match="previous image is incompatible"):
+        deploy.deploy(DIGEST,SHA)
+    assert docker.updates==[NEW]
+    assert host.image_setting(env.read_text())==NEW
+
+
+def test_v2_candidate_requires_matching_schema_label_before_mutation(deployment):
+    deploy,docker,env,original=deployment
+    docker.schema_revision=2
+    with pytest.raises(host.DeploymentError,match="schema revision mismatch"):
+        deploy.deploy(DIGEST,SHA)
+    assert env.read_text()==original and not docker.updates
+
+
+def test_v2_to_v2_readiness_failure_still_rolls_back(deployment):
+    deploy,docker,env,original=deployment
+    docker.schema_revision=2
+    docker.image_schema=docker.previous_schema="2"
+    docker.bad_catalog=True
+    with pytest.raises(host.DeploymentError,match="previous image restored"):
+        deploy.deploy(DIGEST,SHA)
+    assert env.read_text()==original and docker.updates==[NEW,OLD]

@@ -1,3 +1,6 @@
+> Schema v2 multi-user rollout: see [manual transition](../transitions/README.md).
+> Automatic production deployment is held until `BACKEND_SCHEMA_VERSION=2`.
+
 # TradingAgents CI
 
 `.github/workflows/ci.yml` runs for pull requests, pushes to `main` and version

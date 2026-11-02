@@ -371,7 +371,7 @@ class OpenAIClient(BaseLLMClient):
             # placeholder. The env-var name is the single source in api_key_env.
             # A signed-in provider sends its own credential, and only that.
             api_key_env = get_api_key_env(self.provider)
-            api_key = os.environ.get(api_key_env) if api_key_env else None
+            api_key = self.kwargs.get("api_key") or (os.environ.get(api_key_env) if api_key_env else None)
             if spec.credential is not None:
                 if "api_key" in self.kwargs:
                     raise ValueError(f"Provider '{self.provider}' uses its sign-in, not an api_key.")

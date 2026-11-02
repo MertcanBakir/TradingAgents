@@ -53,8 +53,6 @@ def application():
     if dispatch_mode == "database":
         from .personal import DatabaseDispatcher
 
-        if settings.personal_user_id is None:
-            raise AnalysisServiceError("PERSONAL_OWNER_REQUIRED")
         dispatcher = DatabaseDispatcher()
     else:
         if settings.personal_chatgpt_enabled:
@@ -90,8 +88,6 @@ def serve(repository, *, maintenance=False):
 
     from .worker import Worker
 
-    if repository.settings.personal_user_id is None:
-        raise AnalysisServiceError("PERSONAL_OWNER_REQUIRED")
     stop = threading.Event()
 
     def interrupted(_signum, _frame):
@@ -101,7 +97,7 @@ def serve(repository, *, maintenance=False):
     previous = {s: signal.signal(s, interrupted) for s in (signal.SIGTERM, signal.SIGINT)}
     guard = nullcontext(True)
     try:
-        if not maintenance:
+        if not maintenance and repository.settings.personal_chatgpt_enabled:
             from tradingagents.dataflows.files import locked
 
             from .personal import configure_auth
@@ -123,7 +119,7 @@ def serve(repository, *, maintenance=False):
                             print(json.dumps(EvaluationJob(repository).run()), flush=True)
                             evaluation_due = time.monotonic() + 3600
                     else:
-                        if time.monotonic() >= model_catalog_due:
+                        if repository.settings.personal_chatgpt_enabled and time.monotonic() >= model_catalog_due:
                             try:
                                 from .personal import configure_auth
 

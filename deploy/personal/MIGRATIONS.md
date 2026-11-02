@@ -1,3 +1,6 @@
+> Schema v2 multi-user rollout: see [manual transition](../transitions/README.md).
+> Automatic production deployment is held until `BACKEND_SCHEMA_VERSION=2`.
+
 # Database delivery
 
 Deployment runs the tested image's migration runner **before** changing `.env`

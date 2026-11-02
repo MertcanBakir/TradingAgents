@@ -49,36 +49,38 @@ def _execute_child(repository, job_id: UUID, token: UUID, output: Path):
         raise AnalysisServiceError("WORKER_LEASE_LOST")
     repository.settings.require_owner(job["user_id"])
     personal = job.get("auth_type", "api_key") == "personal_chatgpt"
+    credentials = {}
     if personal:
+        repository.settings.require_personal_owner(job["user_id"])
         from .personal import configure_auth
 
         auth = configure_auth(repository.settings)
-        provider = "chatgpt"
-        key = None
-    else:
-        connection = repository.connection(job["user_id"], job["connection_id"])
-        provider = connection["provider"]
-        key = SecretVault(repository.settings).decrypt(
-            connection["secret_ciphertext"],
-            user_id=job["user_id"],
-            connection_id=connection["id"],
-            provider=provider,
-        )
-    if personal:
         try:
             allowed = {model_id for _name, model_id in auth.list_models()}
         except auth.ChatGPTAuthError:
             raise AnalysisServiceError("CHATGPT_LOGIN_REQUIRED") from None
         except Exception:
             raise AnalysisServiceError("CHATGPT_TEMPORARILY_UNAVAILABLE") from None
+        for tier in ("quick", "deep"):
+            choice = job["model_settings"][tier]
+            if choice["provider"] != "chatgpt" or choice["model"] not in allowed:
+                raise AnalysisServiceError("MODEL_NOT_ALLOWED")
     else:
-        if provider not in repository.settings.allowed_models:
-            raise AnalysisServiceError("PROVIDER_NOT_AVAILABLE")
-        allowed = set(repository.settings.allowed_models[provider])
-    for tier in ("quick", "deep"):
-        choice = job["model_settings"][tier]
-        if choice["provider"] != provider or choice["model"] not in allowed:
-            raise AnalysisServiceError("MODEL_NOT_ALLOWED")
+        rows = repository.execution_bindings(job["user_id"], job_id)
+        if len(rows) != 2 or {row["tier"] for row in rows} != {"quick", "deep"}:
+            raise AnalysisServiceError("CONNECTION_NOT_FOUND")
+        vault = SecretVault(repository.settings)
+        for connection in rows:
+            tier, provider = connection["tier"], connection["provider"]
+            choice = job["model_settings"][tier]
+            if (connection["user_id"] != job["user_id"] or provider == "chatgpt"
+                    or choice["provider"] != provider
+                    or choice["model"] not in repository.settings.allowed_models.get(provider, ())):
+                raise AnalysisServiceError("MODEL_NOT_ALLOWED")
+            credentials[(tier, provider)] = vault.decrypt(
+                connection["secret_ciphertext"], user_id=job["user_id"],
+                connection_id=connection["id"], provider=provider,
+            )
     # This process belongs to one analysis. No shared env mutation in API threads.
     for name in list(os.environ):
         if (
@@ -99,9 +101,7 @@ def _execute_child(repository, job_id: UUID, token: UUID, output: Path):
             os.environ.pop(name, None)
     os.environ["LANGCHAIN_TRACING_V2"] = "false"
     os.environ["LANGSMITH_TRACING"] = "false"
-    if not personal:
-        os.environ[PROVIDER_API_KEY_ENV[provider]] = key
-    else:
+    if personal:
         # Resolve/refresh before graph construction. Never fall back to API keys.
         try:
             auth.access_token()
@@ -130,11 +130,16 @@ def _execute_child(repository, job_id: UUID, token: UUID, output: Path):
 
     threading.Thread(target=watchdog, daemon=True).start()
     try:
-        result = engine.run(
-            AnalysisRequest.model_validate(job["request"]),
-            user_id=job["user_id"],
-            analysis_id=job_id,
-        )
+        from contextlib import nullcontext
+
+        from tradingagents.llm_clients.tier_credentials import tier_credentials
+
+        with (nullcontext() if personal else tier_credentials(credentials)):
+            result = engine.run(
+                AnalysisRequest.model_validate(job["request"]),
+                user_id=job["user_id"],
+                analysis_id=job_id,
+            )
     finally:
         finished.set()
     data = {

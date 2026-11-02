@@ -15,5 +15,6 @@
       "sha256": "5cb98ac22540ab2a2a5ff12be31f3ac2ac6c5a7c4c9b8a24869fa77a1c0b9c68"
     }
   ],
-  "migrations": []
+  "migrations": [],
+  "backend_schema": 2
 }
