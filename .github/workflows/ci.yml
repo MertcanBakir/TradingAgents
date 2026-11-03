@@ -40,7 +40,24 @@ jobs:
           pip install -e ".[dev,backend]"
           python -m pip check
       - name: Run test suite
+        if: matrix.python-version != '3.13'
         run: python -m pytest -q --junitxml=test-results/junit.xml
+      - name: Run test suite with branch coverage
+        if: matrix.python-version == '3.13'
+        env:
+          COVERAGE_FILE: test-results/coverage-unit
+        run: |
+          python -m pip install coverage==7.17.0
+          mkdir -p test-results
+          python -m coverage run -m pytest -q --junitxml=test-results/junit.xml
+      - name: Upload unit coverage data
+        if: ${{ !cancelled() && matrix.python-version == '3.13' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-unit
+          path: test-results/coverage-unit
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload test report
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -59,13 +76,19 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-      - name: Fresh install (no dev extras) and import
+      - name: Build and test the installed wheel outside the checkout
+        env:
+          TRADINGAGENTS_NO_UPDATE_CHECK: '1'
         run: |
-          python -m pip install --upgrade pip
-          pip install .
-          # Catches undeclared runtime deps (e.g. #994 python-dotenv): a bare
-          # install must import the package and the CLI module.
-          python -c "import tradingagents, cli.main; print('clean-install import OK')"
+          python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/wheels" .
+          python -m venv "$RUNNER_TEMP/wheel-smoke"
+          cd "$RUNNER_TEMP"
+          unset PYTHONPATH
+          bin="$RUNNER_TEMP/wheel-smoke/bin"
+          "$bin/python" -m pip install "$RUNNER_TEMP"/wheels/*.whl
+          "$bin/python" -m pip check
+          "$bin/python" -c "import tradingagents, cli.main"
+          "$bin/tradingagents" --help
 
   lint:
     name: ruff (strict, full repo)
@@ -111,11 +134,24 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install migration test dependencies
-        run: pip install -e '.[dev,backend]'
-      - name: Validate manifest and exercise real transactional migrations
+        run: pip install -e '.[dev,backend]' coverage==7.17.0
+      - name: Validate manifest and run PostgreSQL acceptance
+        env:
+          COVERAGE_FILE: test-results/coverage-postgres
         run: |
+          mkdir -p test-results
           python deploy/personal/migrate.py --directory deploy/migrations --validate
-          python -m pytest -m integration tests/test_database_migrations_postgres.py tests/test_provider_connections_postgres.py -q --junitxml=test-results/junit-migrations.xml
+          python -m coverage run -m pytest -m integration -q \
+            tests/test_database_migrations_postgres.py tests/test_provider_connections_postgres.py \
+            tests/test_hosted_backend_postgres.py --junitxml=test-results/junit-migrations.xml
+      - name: Upload PostgreSQL coverage data
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-postgres
+          path: test-results/coverage-postgres
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload migration acceptance report
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -124,6 +160,63 @@ jobs:
           path: test-results/junit-migrations.xml
           retention-days: 14
           if-no-files-found: warn
+
+  coverage:
+    name: coverage report
+    if: ${{ !cancelled() }}
+    needs: [test, database-migrations]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: coverage-unit
+          path: test-results/unit
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: coverage-postgres
+          path: test-results/postgres
+      - name: Combine Python and PostgreSQL line and branch coverage
+        run: |
+          python -m pip install coverage==7.17.0 diff-cover==11.0.0
+          python -m coverage combine test-results/unit/coverage-unit test-results/postgres/coverage-postgres
+          python -m coverage report --format=markdown > test-results/coverage.md
+          python -m coverage xml -o test-results/coverage.xml
+          python -m coverage html -d test-results/coverage-html
+          {
+            echo '## Combined Python and PostgreSQL coverage'
+            echo
+            head -n 2 test-results/coverage.md
+            tail -n 1 test-results/coverage.md
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Report coverage of changed lines
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          diff-cover test-results/coverage.xml --compare-branch "$BASE_SHA" \
+            --branch-coverage --format markdown:test-results/diff-coverage.md
+          {
+            echo "## Changed lines (partial branches count as uncovered)"
+            cat test-results/diff-coverage.md
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-reports
+          path: |
+            test-results/coverage.md
+            test-results/coverage.xml
+            test-results/coverage-html/
+            test-results/diff-coverage.md
+          if-no-files-found: error
+          retention-days: 14
 
   worker-image:
     name: production image (ARM64)

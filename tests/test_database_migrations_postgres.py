@@ -8,6 +8,7 @@ import os
 import shutil
 import socket
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
@@ -54,39 +55,52 @@ def cluster(tmp_path_factory):
                        check=True, capture_output=True)
 
 
-@pytest.fixture
-def database(cluster):
+@contextmanager
+def disposable_database(cluster):
     name = "migration_" + uuid4().hex
     with psycopg.connect(cluster, autocommit=True) as admin:
         for role in ("anon", "authenticated", "service_role"):
             if not admin.execute("SELECT 1 FROM pg_roles WHERE rolname=%s", (role,)).fetchone():
                 admin.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role)))
         admin.execute(sql.SQL("CREATE DATABASE {} TEMPLATE template0").format(sql.Identifier(name)))
-    dsn = make_conninfo(cluster, dbname=name)
     try:
-        with psycopg.connect(dsn, autocommit=True, prepare_threshold=None) as conn:
-            conn.execute("""CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY);
-                CREATE SCHEMA storage;
-                CREATE TABLE storage.buckets(id text PRIMARY KEY,name text,public boolean,
-                                            file_size_limit bigint,allowed_mime_types text[]);
-                CREATE TABLE storage.objects(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-                    bucket_id text,name text,created_at timestamptz DEFAULT now());
-                ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
-                CREATE TABLE public.instruments(id uuid PRIMARY KEY,market text,asset_type text);
-                ALTER TABLE public.instruments ENABLE ROW LEVEL SECURITY;
-                CREATE SCHEMA supabase_migrations;
-                CREATE TABLE supabase_migrations.schema_migrations (
-                    version text PRIMARY KEY,statements text[],name text);""", prepare=False)
-            for m in migrate.load(SOURCE):
-                if not m.baseline:
-                    continue
-                conn.execute((SOURCE / m.file).read_text(), prepare=False)
-                conn.execute(f"INSERT INTO {migrate.HISTORY}(version,name,statements) VALUES (%s,%s,%s)",
-                             (m.version, m.name, list(m.statements)))
-            yield conn, dsn
+        yield make_conninfo(cluster, dbname=name)
     finally:
         with psycopg.connect(cluster, autocommit=True) as admin:
             admin.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
+
+
+def bootstrap_platform(conn):
+    conn.execute("""CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY);
+        CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS
+        $$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
+        GRANT USAGE ON SCHEMA auth TO anon,authenticated;
+        CREATE SCHEMA storage;
+        CREATE TABLE storage.buckets(id text PRIMARY KEY,name text,public boolean,
+                                    file_size_limit bigint,allowed_mime_types text[]);
+        CREATE TABLE storage.objects(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            bucket_id text,name text,created_at timestamptz DEFAULT now());
+        ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;""", prepare=False)
+
+
+@pytest.fixture
+def database(cluster):
+    with disposable_database(cluster) as dsn, psycopg.connect(
+        dsn, autocommit=True, prepare_threshold=None
+    ) as conn:
+        bootstrap_platform(conn)
+        conn.execute("""CREATE TABLE public.instruments(id uuid PRIMARY KEY,market text,asset_type text);
+            ALTER TABLE public.instruments ENABLE ROW LEVEL SECURITY;
+            CREATE SCHEMA supabase_migrations;
+            CREATE TABLE supabase_migrations.schema_migrations (
+                version text PRIMARY KEY,statements text[],name text);""", prepare=False)
+        for m in migrate.load(SOURCE):
+            if not m.baseline:
+                continue
+            conn.execute((SOURCE / m.file).read_text(), prepare=False)
+            conn.execute(f"INSERT INTO {migrate.HISTORY}(version,name,statements) VALUES (%s,%s,%s)",
+                         (m.version, m.name, list(m.statements)))
+        yield conn, dsn
 
 
 def test_historical_baseline_is_checked_read_only_and_adopted_once(database):

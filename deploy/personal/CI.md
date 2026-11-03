@@ -13,8 +13,9 @@ separate [opt-in CD pipeline](CD.md); CI itself never requests AWS credentials.
 
 - **tests**: the non-integration suite with `dev,backend` dependencies on Python
   3.11–3.14, plus a Python 3.12 run in the America/New_York time zone.
-- **clean-install smoke**: imports the core package and CLI after an installation
-  without optional dependencies.
+- **clean-install smoke**: builds the wheel, installs it in a fresh environment
+  without extras, then checks dependencies, imports, and `tradingagents --help`
+  from outside the checkout.
 - **ruff**: checks the entire repository.
 - **production image (ARM64)**: builds the `Dockerfile.worker` test runner, then
   runs the non-integration suite in a container with no external network using
@@ -24,7 +25,12 @@ separate [opt-in CD pipeline](CD.md); CI itself never requests AWS credentials.
   and session initialization using fabricated configuration.
 - **database migration acceptance (PostgreSQL 17)**: validates the image migration
   manifest and exercises real transactional delivery against disposable loopback
-  databases with minimal Supabase platform stubs. See [MIGRATIONS.md](MIGRATIONS.md).
+  databases. Also runs hosted backend integration tests against the versioned
+  TradingAgents migrations and a minimal platform fixture. See [MIGRATIONS.md](MIGRATIONS.md).
+- **coverage report**: combines line and branch coverage from the Python 3.13 UTC
+  and PostgreSQL jobs. The workflow summary shows combined totals and changed-line
+  coverage on PRs, counting partially covered branches as uncovered. The `coverage-reports` artifact contains HTML, XML and Markdown.
+  Coverage percentages are informational.
 - **CI passed**: succeeds only when every required job succeeds. This is the
   stable check name to require in the GitHub `main` branch rules.
 
@@ -73,11 +79,19 @@ GitHub uses the native `ubuntu-24.04-arm` runner.
 
 ## Database integration tests
 
-`tests/test_hosted_backend_postgres.py` is explicitly excluded by the default
-`not integration` selection. It requires local PostgreSQL binaries and the
-separate FinBot repository's complete canonical migration chain and SQL acceptance
-files. The three migration copies in `deploy/migrations/` are not a standalone
-replacement for that chain. That full FinBot integration suite still needs a separate setup. The required
-migration acceptance job independently tests the three SQL copies and the new
-delivery runner on real PostgreSQL with minimal platform stubs; it does not
-claim full FinBot or live managed Supabase coverage.
+The default Python matrix excludes integration tests. The PostgreSQL 17 CI job
+runs the migration, provider connection and hosted backend suites. Hosted tests
+use the versioned TradingAgents migration copies and schema transition with a
+minimal synthetic Auth, Storage and instrument schema. This exercises the real
+backend SQL without accessing a live Supabase project or the private FinBot repo.
+
+To also exercise the full canonical FinBot migration chain and FinBot-specific
+portfolio and RPC contracts, run locally with a FinBot checkout:
+
+```sh
+FINBOT_ROOT=/path/to/FinBot python -m pytest -m integration tests/test_hosted_backend_postgres.py
+```
+
+The FinBot-only cases are skipped in public CI. CI supplies a disposable
+PostgreSQL service; a local run starts a loopback server using PostgreSQL binaries
+from `TEST_PG_BIN` or the local installation.
