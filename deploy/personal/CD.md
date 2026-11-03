@@ -61,6 +61,21 @@ The immutable OIDC subject prefix in the template is specific to
 Repository rename/transfer or custom OIDC subjects require reviewing this trust
 policy. Do not substitute a wildcard subject to work around authentication errors.
 
+## Local Docker image retention
+
+After a new image passes deployment readiness checks, the host helper keeps the
+running image and up to two compatible CI rollback images. It prefers the just
+replaced image. Images referenced by any container, including stopped containers,
+are protected. Locally tagged images, known ECR release tags, and unrelated images
+are excluded. The helper removes only eligible digest references with no force.
+ECR retention is managed independently.
+
+Run the versioned helper with `--retention-preview` through an administrator SSM
+session before merging a helper update. The preview takes the deployment lock and
+lists candidates without deleting them. Deploy results include `image_retention`.
+Inventory and removal failures are reported there after deployment readiness,
+so a cleanup warning does not roll back the application.
+
 ## Host installation and deployment behavior
 
 The helper is root-owned at

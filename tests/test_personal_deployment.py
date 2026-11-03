@@ -146,6 +146,8 @@ class Docker:
             if self.pull_failure:
                 raise host.DeploymentError("Pull failed")
             return ""
+        if args[:3] == ["docker", "image", "ls"]:
+            return ""
         if args[:3] == ["docker", "image", "inspect"]:
             return json.dumps([{"Os": "linux", "Architecture": self.architecture,
                 "Config": {"Labels": {"org.opencontainers.image.revision": self.revision,
@@ -387,3 +389,80 @@ def test_v2_to_v2_readiness_failure_still_rolls_back(deployment):
     with pytest.raises(host.DeploymentError,match="previous image restored"):
         deploy.deploy(DIGEST,SHA)
     assert env.read_text()==original and docker.updates==[NEW,OLD]
+
+
+def test_retention_preview_and_cleanup_protect_containers_and_manual_images(deployment):
+    deploy, docker, _, _ = deployment
+    live, rollback, used, oldest, manual, tagged, other = [
+        host.REPOSITORY + "@sha256:" + c * 64 for c in "abcdef0"
+    ]
+
+    def image(ref, day, *, tags=None, schema="2"):
+        return {
+            "Id": ref.split("@")[1],
+            "Created": f"2026-11-{day:02}T00:00:00Z",
+            "RepoDigests": [ref],
+            "RepoTags": tags,
+            "Config": {"Labels": {
+                "org.opencontainers.image.revision": SHA, "io.finbot.backend-schema": schema
+            }},
+        }
+
+    inventory = [
+        image(live, 5), image(rollback, 4), image(used, 1), image(oldest, 2),
+        image(manual, 3), image(tagged, 3, tags=["manual:latest"]),
+        image(other.replace(host.REPOSITORY, "another-repository"), 3),
+    ]
+    removed = []
+
+    def run(args, **kwargs):
+        if args[:3] == ["docker", "image", "ls"]:
+            return "\n".join(i["Id"] for i in inventory)
+        if args == ["docker", "image", "inspect", live]:
+            return json.dumps(inventory[:1])
+        if args[:3] == ["docker", "image", "inspect"]:
+            return json.dumps(inventory)
+        if args == ["docker", "ps", "--all", "--quiet"]:
+            return "running\nstopped"
+        if args[:3] == ["docker", "inspect", "--format"]:
+            return "\n".join([inventory[0]["Id"], inventory[2]["Id"]])
+        if args[:3] == ["aws", "ecr", "describe-images"]:
+            return json.dumps([{"digest": inventory[4]["Id"], "tags": ["v1"]}])
+        if args[:4] == ["docker", "image", "rm", "--no-prune"]:
+            removed.append(args[-1])
+            return ""
+        return docker(args, **kwargs)
+
+    deploy.run = run
+    plan = deploy.retain_images(live, preview=True)
+    assert set(plan["keep"]) == {live, rollback, used}
+    assert plan["remove"] == [oldest]
+    assert not removed
+    result = deploy.retain_images(live)
+    assert result["status"] == "ok"
+    assert result["removed"] == removed == [oldest]
+
+
+def test_cleanup_warning_does_not_rollback_verified_deploy(deployment, monkeypatch):
+    deploy, docker, _, _ = deployment
+    calls = []
+
+    def retain(image, *, previous):
+        assert docker.image == image == NEW
+        assert previous == OLD
+        calls.append(image)
+        return {"status": "partial_failure"}
+
+    monkeypatch.setattr(deploy, "retain_images", retain)
+    result = deploy.deploy(DIGEST, SHA)
+    assert result["status"] == "deployed"
+    assert result["image_retention"]["status"] == "partial_failure"
+    assert calls == docker.updates == [NEW]
+
+
+def test_failed_deploy_does_not_trigger_retention(deployment, monkeypatch):
+    deploy, docker, _, _ = deployment
+    docker.bad_catalog = True
+    monkeypatch.setattr(deploy, "retain_images", lambda *a, **kw: pytest.fail("unexpected cleanup"))
+    with pytest.raises(host.DeploymentError, match="previous image restored"):
+        deploy.deploy(DIGEST, SHA)

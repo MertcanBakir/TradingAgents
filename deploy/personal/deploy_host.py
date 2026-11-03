@@ -168,6 +168,73 @@ class Deployment:
             self.sleep(3)
         raise DeploymentError("Readiness failed: services, HTTPS or fresh model catalog unavailable")
 
+    def retain_images(self, current, *, previous=None, preview=False):
+        """Keep the live CI image and up to two rollback images under the deploy lock."""
+        result = {"status": "preview" if preview else "ok", "keep": [], "remove": [], "removed": [], "failed": []}
+        try:
+            image_ids = sorted(set(self.run(
+                ["docker", "image", "ls", "--quiet", "--no-trunc", REPOSITORY]
+            ).splitlines()))
+            if not image_ids:
+                raise DeploymentError("Local image inventory is empty")
+            inventory = json.loads(self.run(["docker", "image", "inspect", *image_ids]))
+            containers = self.run(["docker", "ps", "--all", "--quiet"]).splitlines()
+            if not containers:
+                raise DeploymentError("Container inventory is empty")
+            in_use = set(self.run(["docker", "inspect", "--format", "{{.Image}}", *containers]).splitlines())
+            current_info = json.loads(self.run(["docker", "image", "inspect", current]))[0]
+            current_id = current_info["Id"]
+            if current_id not in in_use:
+                raise DeploymentError("Configured image is not in use")
+            schema = (current_info["Config"].get("Labels") or {}).get("io.finbot.backend-schema", "1")
+            registry = json.loads(self.run([
+                "aws", "ecr", "describe-images", "--region", "eu-west-1",
+                "--repository-name", REPOSITORY.split("/", 1)[1], "--filter", "tagStatus=TAGGED",
+                "--query", "imageDetails[].{digest:imageDigest,tags:imageTags}", "--output", "json",
+            ]))
+            manual = {
+                f"{REPOSITORY}@{entry['digest']}" for entry in registry
+                if any(not tag.startswith("git-") for tag in entry["tags"])
+            }
+            candidates = []
+            for item in inventory:
+                refs = item.get("RepoDigests") or []
+                labels = item["Config"].get("Labels") or {}
+                if (
+                    item.get("RepoTags") or len(refs) != 1 or refs[0] in manual
+                    or not re.fullmatch(re.escape(REPOSITORY) + r"@sha256:[a-f0-9]{64}", refs[0])
+                    or not re.fullmatch(r"[a-f0-9]{40}", labels.get("org.opencontainers.image.revision", ""))
+                ):
+                    continue
+                compatible = labels.get("io.finbot.backend-schema", "1") == schema
+                candidates.append((item["Id"], refs[0], item["Created"], compatible))
+
+            # Reserve the live slot even when it is a manually tagged image.
+            keep = in_use | {current_id}
+            remaining = max(0, 3 - len({current_id} | (keep & {entry[0] for entry in candidates})))
+            ordered = sorted(candidates, key=lambda entry: (entry[1] == previous, entry[2]), reverse=True)
+            for image_id, ref, _, compatible in ordered:
+                if image_id in keep:
+                    result["keep"].append(ref)
+                elif compatible and remaining:
+                    result["keep"].append(ref)
+                    remaining -= 1
+                else:
+                    result["remove"].append(ref)
+        except (DeploymentError, ValueError, KeyError, TypeError, IndexError, AttributeError):
+            return {**result, "status": "inventory_failed"}
+
+        if not preview:
+            for ref in result["remove"]:
+                try:
+                    self.run(["docker", "image", "rm", "--no-prune", ref])
+                except DeploymentError:
+                    result["status"] = "partial_failure"
+                    result["failed"].append(ref)
+                else:
+                    result["removed"].append(ref)
+        return result
+
     def deploy(self, digest, commit):
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest) or not re.fullmatch(r"[0-9a-f]{40}", commit):
             raise DeploymentError("Invalid digest or commit")
@@ -227,14 +294,20 @@ class Deployment:
             raise DeploymentError("Deployment failed; previous image restored and verified") from None
         return {"status": "deployed", "image": image, "commit": commit,
                 "previous_image": previous, "active_jobs_before": before["active_jobs"],
-                "migrations": migrations}
+                "migrations": migrations, "image_retention": self.retain_images(image, previous=previous)}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--digest", required=True)
-    parser.add_argument("--commit", required=True)
+    parser.add_argument("--digest")
+    parser.add_argument("--commit")
+    parser.add_argument("--retention-preview", action="store_true")
     args = parser.parse_args()
+    if args.retention_preview:
+        if args.digest or args.commit:
+            parser.error("--retention-preview cannot be used with deployment arguments")
+    elif not args.digest or not args.commit:
+        parser.error("--digest and --commit are required for deployment")
     if os.geteuid() != 0:
         raise DeploymentError("Run only through the root-owned SSM deployment document")
     config_file = Path("/etc/finbot-tradingagents/cd-config.json")
@@ -254,7 +327,11 @@ def main():
             raise DeploymentError("Deployment interrupted")
         signal.signal(signal.SIGTERM, interrupted)
         with tempfile.TemporaryDirectory(prefix="finbot-ecr-") as credentials:
-            result = Deployment(config, Commands(config["directory"], credentials)).deploy(args.digest, args.commit)
+            deploy = Deployment(config, Commands(config["directory"], credentials))
+            if args.retention_preview:
+                result = deploy.retain_images(image_setting(deploy.env_path.read_text()), preview=True)
+            else:
+                result = deploy.deploy(args.digest, args.commit)
             print(json.dumps(result))
 
 
