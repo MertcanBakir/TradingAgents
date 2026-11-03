@@ -185,7 +185,6 @@ class Repository:
             return self._reap(conn)
 
     def reserve(self, user_id: UUID, key: UUID, payload: StartAnalysis):
-        self.settings.require_owner(user_id)
         digest = hashlib.sha256(
             json.dumps(payload.model_dump(mode="json"), sort_keys=True).encode()
         ).hexdigest()
@@ -287,9 +286,9 @@ class Repository:
             row = conn.execute(
                 """SELECT id FROM analysis_backend.jobs WHERE status='reserved'
                 AND lease_until>clock_timestamp() AND hard_deadline>clock_timestamp()
-                AND (user_id=%s::uuid OR user_id=ANY(%s::uuid[]))
+                AND (auth_type='api_key' OR (%s AND user_id=%s::uuid))
                 ORDER BY created_at,id LIMIT 1""",
-                (self.settings.personal_user_id, list(self.settings.allowed_user_ids)),
+                (self.settings.personal_chatgpt_enabled, self.settings.personal_user_id),
             ).fetchone()
         return row["id"] if row else None
 
@@ -347,15 +346,16 @@ class Repository:
                 """UPDATE analysis_backend.jobs SET status='running',stage='analysis',
                 started_at=clock_timestamp(),lease_token=%s,
                 lease_until=least(hard_deadline,clock_timestamp()+make_interval(secs => %s))
-                WHERE id=%s AND (user_id=%s::uuid OR user_id=ANY(%s::uuid[]))
+                WHERE id=%s
+                AND (auth_type='api_key' OR (%s AND user_id=%s::uuid))
                 AND status='reserved' AND lease_until>clock_timestamp()
                 AND hard_deadline>clock_timestamp() RETURNING *""",
                 (
                     token,
                     self.settings.lease_seconds,
                     job_id,
+                    self.settings.personal_chatgpt_enabled,
                     self.settings.personal_user_id,
-                    list(self.settings.allowed_user_ids),
                 ),
             ).fetchone()
         if not row:
@@ -454,7 +454,6 @@ class SupabaseMemoryRepository:
         self.repository = repository
 
     def save_decision(self, decision: MemoryDecision) -> bool:
-        self.repository.settings.require_owner(decision.user_id)
         with self.repository.transaction() as conn:
             job = conn.execute(
                 "SELECT id FROM analysis_backend.jobs WHERE user_id=%s AND id=%s AND status='success'",
@@ -465,7 +464,6 @@ class SupabaseMemoryRepository:
             return self.repository._save_memory(conn, decision)
 
     def get_context(self, *, user_id, ticker, as_of, max_chars=8000):
-        self.repository.settings.require_owner(user_id)
         if not 500 <= max_chars <= 16000:
             raise ValueError("INVALID_MEMORY_CONTEXT_BUDGET")
         utc_stamp(as_of)
@@ -497,7 +495,6 @@ class SupabaseMemoryRepository:
         return redact_text("\n\n".join(parts))[:max_chars]
 
     def resolve(self, *, user_id, analysis_id, outcome: MemoryOutcome, evaluation_token=None):
-        self.repository.settings.require_owner(user_id)
         with self.repository.transaction() as conn:
             row = conn.execute(
                 "SELECT * FROM analysis_backend.memory WHERE user_id=%s AND analysis_id=%s FOR UPDATE",

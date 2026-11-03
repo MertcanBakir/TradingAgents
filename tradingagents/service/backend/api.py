@@ -103,7 +103,6 @@ def create_app(*, repository, authenticator, vault, probe, storage, dispatcher: 
         if credentials is None:
             raise AnalysisServiceError("AUTHENTICATION_REQUIRED")
         user = authenticator.authenticate(credentials.credentials)
-        repository.settings.require_owner(user)
         repository.throttle(user)
         return user
 

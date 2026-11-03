@@ -47,7 +47,6 @@ def _execute_child(repository, job_id: UUID, token: UUID, output: Path):
         ).fetchone()
     if not job:
         raise AnalysisServiceError("WORKER_LEASE_LOST")
-    repository.settings.require_owner(job["user_id"])
     personal = job.get("auth_type", "api_key") == "personal_chatgpt"
     credentials = {}
     if personal:

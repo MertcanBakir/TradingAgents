@@ -80,7 +80,6 @@ class SupabaseAuthenticator:
             # anonymous Auth session. Never trust a request-supplied UID.
             if data.get("is_anonymous", False) and user_id != self.settings.personal_user_id:
                 raise AnalysisServiceError("AUTHENTICATION_REQUIRED")
-            self.settings.require_owner(user_id)
             return user_id
         except AnalysisServiceError:
             raise

@@ -99,19 +99,13 @@ class BackendSettings(Contract):
     daily_analysis_limit: int = Field(default=10, ge=1, le=100)
     daily_connection_limit: int = Field(default=20, ge=1, le=100)
     allow_local_http: bool = False
-    # Trusted operator configuration, never accepted in HTTP request bodies.
+    # Accepted for compatibility with existing settings. No longer used for access.
     allowed_user_ids: tuple[UUID, ...] = ()
     # This release intentionally keeps a single globally active analysis.
     # Queuing/per-user concurrency is a separate rollout.
     personal_user_id: UUID | None = None
     personal_chatgpt_enabled: bool = False
     personal_chatgpt_auth_file: Path | None = None
-
-    def require_owner(self, user_id: UUID):
-        from ..errors import AnalysisServiceError
-
-        if user_id != self.personal_user_id and user_id not in self.allowed_user_ids:
-            raise AnalysisServiceError("ACCESS_DENIED")
 
     def require_personal_owner(self, user_id: UUID):
         from ..errors import AnalysisServiceError

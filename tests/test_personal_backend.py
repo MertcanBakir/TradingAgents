@@ -75,7 +75,7 @@ def write_record(path, data):
 
 
 @pytest.mark.parametrize("anonymous", [True, False])
-def test_only_verified_owner_is_accepted(tmp_path, anonymous):
+def test_only_owner_can_use_anonymous_session(tmp_path, anonymous):
     s = personal_settings(tmp_path)
     response = {"id": str(OWNER), "role": "authenticated", "is_anonymous": anonymous}
 
@@ -86,9 +86,13 @@ def test_only_verified_owner_is_accepted(tmp_path, anonymous):
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         auth = SupabaseAuthenticator(s, client)
         assert auth.authenticate("real-session") == OWNER
-        response["id"] = str(uuid4())
-        with pytest.raises(AnalysisServiceError, match="AUTHENTICATION_REQUIRED" if anonymous else "ACCESS_DENIED"):
-            auth.authenticate("real-session")
+        other = uuid4()
+        response["id"] = str(other)
+        if anonymous:
+            with pytest.raises(AnalysisServiceError, match="AUTHENTICATION_REQUIRED"):
+                auth.authenticate("real-session")
+        else:
+            assert auth.authenticate("real-session") == other
 
 
 def test_rejected_supabase_token_cannot_use_supplied_owner(tmp_path):
@@ -175,7 +179,7 @@ def test_missing_session_status_is_not_claimed_as_connected(tmp_path):
     assert manage_session(personal_settings(tmp_path), "status")["signed_in"] is False
 
 
-def test_api_owner_gate_before_db_even_with_alternative_authenticator(tmp_path):
+def test_personal_catalog_is_only_visible_to_owner(tmp_path):
     repo, auth = MagicMock(), MagicMock()
     repo.settings = personal_settings(tmp_path)
     repo.provider_models.return_value = [{"id": "gpt-session-model", "name": "GPT Session Model"}]
@@ -189,11 +193,10 @@ def test_api_owner_gate_before_db_even_with_alternative_authenticator(tmp_path):
         dispatcher=DatabaseDispatcher(),
     )
     with TestClient(app) as client:
-        assert (
-            client.get("/v1/providers", headers={"Authorization": "Bearer token"}).status_code
-            == 403
-        )
-        repo.throttle.assert_not_called()
+        result = client.get("/v1/providers", headers={"Authorization": "Bearer token"})
+        assert result.status_code == 200
+        assert result.json()["unavailable"]["chatgpt"] == "PERSONAL_OWNER_ONLY"
+        repo.provider_models.assert_not_called()
         auth.authenticate.return_value = OWNER
         body = client.get("/v1/providers", headers={"Authorization": "Bearer token"}).json()
         assert body["providers"][0]["auth_type"] == "personal_chatgpt"

@@ -48,7 +48,7 @@ def settings(**overrides):
 def http_api():
     repo, auth, vault, probe, storage, dispatcher = (MagicMock() for _ in range(6))
     user, job_id = uuid4(), uuid4()
-    repo.settings = settings(allowed_user_ids=(user,))
+    repo.settings = settings()
     auth.authenticate.return_value = user
     row = {
         "id": job_id,
@@ -255,7 +255,7 @@ def test_auth_is_verified_by_fixed_supabase_server_not_decoded_claims():
         )
 
     with httpx.Client(transport=httpx.MockTransport(reply)) as client:
-        assert SupabaseAuthenticator(settings(allowed_user_ids=(user,)), client).authenticate("valid-token") == user
+        assert SupabaseAuthenticator(settings(), client).authenticate("valid-token") == user
 
 
 @pytest.mark.parametrize(
@@ -568,7 +568,6 @@ def test_child_uses_only_owner_key_and_clears_inherited_provider_credentials(tmp
     repo = MagicMock()
     repo.settings = settings()
     user, job_id, token, connection = uuid4(), uuid4(), uuid4(), uuid4()
-    repo.settings = settings(allowed_user_ids=(user,))
     model_settings = {
         "quick": {"provider": "openai", "model": "gpt-5.6-sol"},
         "deep": {"provider": "openai", "model": "gpt-5.6-sol"},
