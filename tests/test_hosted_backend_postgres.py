@@ -1,16 +1,13 @@
 """Real PostgreSQL acceptance. Ephemeral loopback cluster, never a remote DSN.
 
-Run explicitly with -m integration. Applies the complete FinBot migration chain
-against small Supabase platform stubs (auth users/uid, storage bucket metadata).
+Run explicitly with -m integration. Uses the versioned TradingAgents migrations
+and a minimal platform fixture. Set FINBOT_ROOT to test the full FinBot chain.
 Auth/Storage HTTP behavior is tested separately with httpx's real client boundary.
 """
 
 from __future__ import annotations
 
 import os
-import shutil
-import socket
-import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -22,6 +19,9 @@ import psycopg
 import pytest
 from psycopg.rows import dict_row
 
+from deploy.personal import migrate
+from tests import test_database_migrations_postgres as postgres
+from tests.test_database_migrations import SOURCE
 from tests.test_hosted_backend import settings
 from tradingagents.service.backend.contracts import StartAnalysis
 from tradingagents.service.backend.evaluation import EvaluationJob
@@ -116,92 +116,44 @@ def test_personal_database_contract_rejects_missing_or_mixed_credentials(db):
     assert db.repo.job(db.a, row["id"])["auth_type"] == "api_key"
 
 
+postgres_service = postgres.cluster
+
+
 @pytest.fixture(scope="module")
-def cluster(tmp_path_factory):
-    bin_dir = Path(os.environ.get("TEST_PG_BIN", "/opt/homebrew/opt/postgresql@17/bin"))
-    if not (bin_dir / "initdb").exists():
-        found = shutil.which("initdb")
-        if not found:
-            pytest.skip("PostgreSQL binaries missing; set TEST_PG_BIN")
-        bin_dir = Path(found).parent
-    migrations = (
-        Path(os.environ.get("FINBOT_ROOT", str(Path(__file__).resolve().parents[2] / "FinBot")))
-        / "supabase/migrations"
-    )
-    if not migrations.is_dir():
-        pytest.skip("FinBot migration chain missing; set FINBOT_ROOT")
-    root = tmp_path_factory.mktemp("analysis-postgres")
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-    subprocess.run(
-        [
-            str(bin_dir / "initdb"),
-            "-D",
-            str(root / "db"),
-            "-U",
-            "postgres",
-            "-A",
-            "trust",
-            "--no-locale",
-            "-E",
-            "UTF8",
-        ],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        [
-            str(bin_dir / "pg_ctl"),
-            "-D",
-            str(root / "db"),
-            "-l",
-            str(root / "postgres.log"),
-            "-o",
-            f"-h 127.0.0.1 -p {port} -c unix_socket_directories=''",
-            "-w",
-            "start",
-        ],
-        check=True,
-        capture_output=True,
-    )
-    dsn = f"postgresql://postgres@127.0.0.1:{port}/postgres"
-    try:
-        with psycopg.connect(dsn, autocommit=True) as conn:
-            conn.execute("""CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;
-                CREATE ROLE service_role NOLOGIN; CREATE SCHEMA auth; CREATE SCHEMA storage;
-                CREATE TABLE auth.users(id uuid PRIMARY KEY);
-                CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS
-                $$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
-                GRANT USAGE ON SCHEMA auth TO anon,authenticated;
-                CREATE TABLE storage.buckets(id text PRIMARY KEY,name text,public boolean,
-                                            file_size_limit bigint,allowed_mime_types text[]);
-                CREATE TABLE storage.objects(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-                    bucket_id text,name text,created_at timestamptz DEFAULT now());
-                ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;""")
-            files = sorted(migrations.glob("*.sql"))
-            assert len({p.name.split("_")[0] for p in files}) == len(files)
+def finbot_root():
+    root = os.environ.get("FINBOT_ROOT")
+    if not root:
+        return None
+    path = Path(root)
+    assert (path / "supabase/migrations").is_dir(), "FINBOT_ROOT must contain Supabase migrations"
+    return path
+
+
+@pytest.fixture(scope="module")
+def cluster(postgres_service, finbot_root):
+    with postgres.disposable_database(postgres_service) as dsn:
+        with psycopg.connect(dsn, autocommit=True, prepare_threshold=None) as conn:
+            postgres.bootstrap_platform(conn)
+            if finbot_root is None:
+                conn.execute("""CREATE TABLE public.instruments (
+                    id uuid PRIMARY KEY DEFAULT gen_random_uuid(), market text NOT NULL,
+                    symbol text NOT NULL, company_name text NOT NULL, is_active boolean NOT NULL,
+                    asset_type text NOT NULL, currency text NOT NULL, UNIQUE (market, symbol)
+                );
+                ALTER TABLE public.instruments ENABLE ROW LEVEL SECURITY;""", prepare=False)
+                files = [SOURCE / m.file for m in migrate.load(SOURCE) if m.baseline]
+            else:
+                files = sorted((finbot_root / "supabase/migrations").glob("*.sql"))
+                assert len({p.name.split("_")[0] for p in files}) == len(files)
             for migration in files:
                 conn.execute(migration.read_text(), prepare=False)
-            # Run the repository's actual SQL security acceptance file too.
-            conn.execute(
-                (migrations.parents[1] / "tests/sql/analysis_backend_test.sql")
-                .read_text()
-                .replace("\\set ON_ERROR_STOP on", ""),
-                prepare=False,
-            )
-            # Verify the retired personal SQL contract on its matching v1 schema.
-            conn.execute((migrations.parents[1] / "tests/sql/personal_analysis_auth_test.sql").read_text().replace("\\set ON_ERROR_STOP on", ""), prepare=False)
-            conn.execute(
-                (Path(__file__).resolve().parents[1] / "deploy/transitions/20261102000000_multi_user_provider_connections.sql").read_text(), prepare=False,
-            )
+            if finbot_root is not None:
+                for name in ("analysis_backend_test.sql", "personal_analysis_auth_test.sql"):
+                    sql = (finbot_root / "tests/sql" / name).read_text()
+                    conn.execute(sql.replace("\\set ON_ERROR_STOP on", ""), prepare=False)
+            transition = SOURCE.parent / "transitions/20261102000000_multi_user_provider_connections.sql"
+            conn.execute(transition.read_text(), prepare=False)
         yield dsn
-    finally:
-        subprocess.run(
-            [str(bin_dir / "pg_ctl"), "-D", str(root / "db"), "-m", "fast", "-w", "stop"],
-            check=True,
-            capture_output=True,
-        )
 
 
 @dataclass
@@ -498,7 +450,9 @@ def test_revocation_scrubs_ciphertext_but_preserves_history(db):
         db.reserve()
 
 
-def test_reset_investments_does_not_delete_analysis_or_memory(db):
+def test_reset_investments_does_not_delete_analysis_or_memory(db, finbot_root):
+    if finbot_root is None:
+        pytest.skip("Requires the FinBot portfolio schema via FINBOT_ROOT")
     d = db.memory()
     with psycopg.connect(db.dsn, autocommit=True) as conn, conn.transaction():
         conn.execute("SET LOCAL ROLE authenticated")
@@ -648,9 +602,10 @@ def test_api_engine_worker_storage_roundtrip_and_user_b_denial(db, personal, tmp
         "tests/sql/mobile_system_health_rpc_test.sql",
     ],
 )
-def test_existing_finbot_sql_contracts_still_pass(cluster, filename):
-    root = Path(os.environ.get("FINBOT_ROOT", str(Path(__file__).resolve().parents[2] / "FinBot")))
-    sql = (root / filename).read_text().replace("\\set ON_ERROR_STOP on", "")
+def test_existing_finbot_sql_contracts_still_pass(cluster, filename, finbot_root):
+    if finbot_root is None:
+        pytest.skip("Requires FinBot SQL contracts via FINBOT_ROOT")
+    sql = (finbot_root / filename).read_text().replace("\\set ON_ERROR_STOP on", "")
     with psycopg.connect(cluster, autocommit=True) as conn:
         conn.execute(sql, prepare=False)
 

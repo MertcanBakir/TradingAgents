@@ -78,6 +78,12 @@ filterwarnings = [
     "ignore::DeprecationWarning",
 ]
 
+[tool.coverage.run]
+branch = true
+relative_files = true
+source = ["."]
+omit = ["tests/*"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
