@@ -10,14 +10,13 @@ Every `/v1/*` route requires `Authorization: Bearer <Supabase access token>`.
 The backend verifies the token online with Supabase; it derives the user ID and
 never accepts a user ID or an administrative role from the request body.
 
-Only the configured `personal_user_id` and `allowed_user_ids` may enter. Invitees
-must have a non-anonymous Supabase account. The existing explicitly configured
-personal owner may keep their anonymous account. An empty invite list does not
-open the service to everyone. Settings changes require service recreation.
+Any registered, non-anonymous Supabase user with a valid session can use API-key
+connections without per-user configuration. The configured personal owner may
+continue using their existing anonymous session.
 
-The personal ChatGPT session belongs only to `personal_user_id`. Its provider is
-not returned to invitees; personal analysis requests by invitees return 403.
-The owner can alternatively use their own API connections just like invitees.
+The personal ChatGPT session belongs only to `personal_user_id`. Other users
+cannot see its model catalog or start a personal ChatGPT analysis (403).
+The owner can also use their own API-key connections.
 
 ## Discover providers and models
 

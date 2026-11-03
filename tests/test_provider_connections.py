@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from tests.test_hosted_backend import settings
-from tests.test_personal_backend import OWNER, personal_settings
+from tests.test_personal_backend import personal_settings
 from tradingagents.llm_clients import factory
 from tradingagents.llm_clients.tier_credentials import credential_for, tier_credentials
 from tradingagents.service.backend.api import create_app
@@ -55,27 +55,10 @@ def test_new_contract_binds_each_tier_and_rejects_untrusted_configuration():
         ConnectionInput(provider="openai", api_key="PRIVATE_TEST_KEY", name="bad\nname")
 
 
-def test_allowlist_is_closed_and_personal_owner_is_separate(tmp_path):
-    invited, outsider = uuid4(), uuid4()
-    s = personal_settings(
-        tmp_path,
-        allowed_user_ids=(invited,),
-        allowed_models={"openai": ("fast-model",), "chatgpt": ("session-model",)},
-    )
-    s.require_owner(invited)
-    s.require_owner(OWNER)
-    with pytest.raises(AnalysisServiceError, match="ACCESS_DENIED"):
-        s.require_owner(outsider)
-    with pytest.raises(AnalysisServiceError, match="ACCESS_DENIED"):
-        s.require_personal_owner(invited)
-    with pytest.raises(AnalysisServiceError, match="ACCESS_DENIED"):
-        settings().require_owner(invited)
-
-
 @pytest.mark.parametrize("anonymous", [False, True])
-def test_invited_supabase_account_must_be_verified_and_nonanonymous(tmp_path, anonymous):
+def test_unlisted_supabase_account_can_sign_in_if_registered(tmp_path, anonymous):
     invited = uuid4()
-    s = personal_settings(tmp_path, allowed_user_ids=(invited,))
+    s = personal_settings(tmp_path)
     with httpx.Client(
         transport=httpx.MockTransport(
             lambda _: httpx.Response(
@@ -95,7 +78,6 @@ def test_nonowner_sees_api_providers_but_never_owner_session_catalog(tmp_path):
     repo, auth = MagicMock(), MagicMock()
     repo.settings = personal_settings(
         tmp_path,
-        allowed_user_ids=(invited,),
         allowed_models={
             "chatgpt": ("session-model",),
             "openai": ("api-model",),
@@ -208,9 +190,8 @@ def test_api_only_daemon_does_not_need_personal_session(monkeypatch):
 
     from tradingagents.service.backend import runtime, worker
 
-    invited = uuid4()
     repo = MagicMock()
-    repo.settings = settings(allowed_user_ids=(invited,))
+    repo.settings = settings()
     repo.next_reserved.return_value = uuid4()
     handlers = {}
 

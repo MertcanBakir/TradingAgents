@@ -85,17 +85,13 @@ is not reversed by changing LUCRARI_IMAGE or restoring .env.
    Keep maintenance on, inspect the failure and generate a fresh dry-run; do not
    blindly retry. An already-completed transition is rejected rather than wiping
    new users' data a second time.
-7. Prepare a separate protected copy of settings with real invited Supabase UUIDs in allowed_user_ids
-   and operator-approved models for the chosen API providers in allowed_models.
-   Do not replace the active settings yet: the old image rejects the new
-   allowed_user_ids field, including during the helper preflight. The first v2
-   rollout uses the existing owner-only settings. Keep personal_user_id,
+7. Prepare protected settings with operator-approved models in allowed_models.
+   The first v2 rollout can use the existing settings. Keep personal_user_id,
    personal_chatgpt_enabled, personal_chatgpt_auth_file,
    encryption keys, DSN and CA mount intact. Example non-secret changes:
 
    ```json
    {
-     "allowed_user_ids": ["<invited Supabase user UUID>"],
      "allowed_models": {
        "chatgpt": ["<existing owner catalog placeholder>"],
        "openai": ["<approved model ID>"],
@@ -111,9 +107,9 @@ is not reversed by changing LUCRARI_IMAGE or restoring .env.
    CD for the successful current-main push CI attempt. The new migration checker
    verifies v2; it does not execute this reset. If the candidate is stale/expired,
    refresh main CI first. Keep maintenance until the intended image, HTTPS health,
-   fresh personal model catalog, owner-only ChatGPT access and invited API routes
+   fresh personal model catalog, owner-only ChatGPT access and registered-user API routes
    are verified. Once all containers run v2, install the prepared settings and
-   recreate API/worker/maintenance under the admission block; verify invited API
+   recreate API/worker/maintenance under the admission block; verify registered-user API
    routes and owner behavior again. Paid provider calls require deliberate test
    credentials/approval.
 9. Reopen admissions only after backend checks and the frontend contract are ready.

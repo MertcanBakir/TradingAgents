@@ -45,7 +45,6 @@ def db(baseline_database):
     )
     s = settings(
         database_url=dsn,
-        allowed_user_ids=(a, b),
         allowed_models={"openai": ("fast-model", "deep-model"), "anthropic": ("deep-model",)},
     )
     repo = Repository(s)
@@ -181,7 +180,7 @@ def test_owner_only_personal_mode_has_no_api_bindings(db, tmp_path):
     from tests.test_personal_backend import personal_settings
 
     personal = personal_settings(
-        tmp_path, personal_user_id=db.a, allowed_user_ids=(db.b,), database_url=db.dsn
+        tmp_path, personal_user_id=db.a, database_url=db.dsn
     )
     repo = Repository(personal)
     repo.replace_provider_models("chatgpt", [("Session", "gpt-5.6-sol")])
@@ -197,13 +196,9 @@ def test_owner_only_personal_mode_has_no_api_bindings(db, tmp_path):
     assert repo.execution_bindings(db.a, row["id"]) == []
 
 
-def test_discovery_and_claim_include_invited_users_and_reject_outsiders(db):
+def test_discovery_and_claim_include_unlisted_users(db):
     row, _ = reserve(db, a="C", b="C", user=db.b)
     assert db.repo.next_reserved() == row["id"]
-    outsider = Repository(db.s.model_copy(update={"allowed_user_ids": ()}))
-    assert outsider.next_reserved() is None
-    with pytest.raises(AnalysisServiceError, match="WORKER_CLAIM_REJECTED"):
-        outsider.claim(row["id"])
     assert db.repo.claim(row["id"])["user_id"] == db.b
 
 

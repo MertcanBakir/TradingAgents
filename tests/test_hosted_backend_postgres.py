@@ -89,7 +89,18 @@ def test_personal_real_parallel_admission_never_exceeds_one(db, tmp_path):
 def test_personal_uid_change_never_migrates_old_records_or_claims_them(db, tmp_path):
     from tests.test_personal_backend import personal_settings
 
-    row = db.reserve()
+    original = Repository(personal_settings(tmp_path, database_url=db.dsn, personal_user_id=db.a))
+    original.replace_provider_models("chatgpt", [("Session model", "gpt-5.6-sol")])
+    row, _ = original.reserve(
+        db.a,
+        uuid4(),
+        StartAnalysis(
+            request={"ticker": "NVDA", "analysis_date": "2026-01-01"},
+            auth_type="personal_chatgpt",
+            quick_model="gpt-5.6-sol",
+            deep_model="gpt-5.6-sol",
+        ),
+    )
     repo = Repository(personal_settings(tmp_path, database_url=db.dsn, personal_user_id=db.b))
     assert repo.history(db.b, 20, 0) == ([], 0)
     assert repo.next_reserved() is None
@@ -250,7 +261,7 @@ class Fixture:
 @pytest.fixture
 def db(cluster):
     a, b, c = uuid4(), uuid4(), uuid4()
-    repo = Repository(settings(database_url=cluster, allowed_user_ids=(a,b)))
+    repo = Repository(settings(database_url=cluster))
     f = Fixture(cluster, repo, a, b, c)
     f.sql("INSERT INTO auth.users(id) VALUES(%s),(%s)", (a, b))
     f.sql(
