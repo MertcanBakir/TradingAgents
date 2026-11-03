@@ -71,7 +71,7 @@ class Repository:
         if row["hits"] > limit:
             raise AnalysisServiceError("RATE_LIMITED")
 
-    def add_connection(self, user_id, connection_id, provider, ciphertext):
+    def add_connection(self, user_id, connection_id, provider, ciphertext, *, name=""):
         with self.transaction() as conn:
             conn.execute("SELECT pg_advisory_xact_lock(710191)")
             count = conn.execute(
@@ -82,15 +82,15 @@ class Repository:
                 raise AnalysisServiceError("CONNECTION_LIMIT")
             conn.execute(
                 """INSERT INTO analysis_backend.connections
-                (id,user_id,provider,secret_ciphertext,status,verified_at)
-                VALUES(%s,%s,%s,%s,'active',clock_timestamp())""",
-                (connection_id, user_id, provider, ciphertext),
+                (id,user_id,provider,secret_ciphertext,status,verified_at,name)
+                VALUES(%s,%s,%s,%s,'active',clock_timestamp(),%s)""",
+                (connection_id, user_id, provider, ciphertext, name),
             )
 
     def connections(self, user_id):
         with self.transaction() as conn:
             return conn.execute(
-                """SELECT id,provider,status,created_at,verified_at
+                """SELECT id,provider,name,status,created_at,verified_at
                 FROM analysis_backend.connections WHERE user_id=%s AND status='active'
                 ORDER BY created_at DESC,id DESC""",
                 (user_id,),
@@ -200,22 +200,31 @@ class Repository:
                 if old["request_hash"] != digest:
                     raise AnalysisServiceError("IDEMPOTENCY_CONFLICT")
                 return old, False
+            bindings = []
             if payload.auth_type == "personal_chatgpt":
-                if not self.settings.personal_chatgpt_enabled:
-                    raise AnalysisServiceError("PROVIDER_NOT_AVAILABLE")
-                provider = "chatgpt"
-                allowed = {item["id"] for item in self._catalog_models(conn, provider)}
+                self.settings.require_personal_owner(user_id)
+                allowed = {item["id"] for item in self._catalog_models(conn, "chatgpt")}
+                if payload.quick_model not in allowed or payload.deep_model not in allowed:
+                    raise AnalysisServiceError("MODEL_NOT_ALLOWED")
+                model_settings = {
+                    "quick": {"provider": "chatgpt", "model": payload.quick_model},
+                    "deep": {"provider": "chatgpt", "model": payload.deep_model},
+                }
             else:
-                connection = conn.execute(
-                    "SELECT provider FROM analysis_backend.connections WHERE user_id=%s AND id=%s AND status='active' FOR SHARE",
-                    (user_id, payload.connection_id),
-                ).fetchone()
-                if not connection:
-                    raise AnalysisServiceError("CONNECTION_NOT_FOUND")
-                provider = connection["provider"]
-                allowed = set(self.settings.allowed_models.get(provider, ()))
-            if payload.quick_model not in allowed or payload.deep_model not in allowed:
-                raise AnalysisServiceError("MODEL_NOT_ALLOWED")
+                model_settings = {}
+                for tier in ("quick", "deep"):
+                    selection = getattr(payload.models, tier)
+                    connection = conn.execute(
+                        "SELECT provider FROM analysis_backend.connections WHERE user_id=%s AND id=%s AND status='active' FOR SHARE",
+                        (user_id, selection.connection_id),
+                    ).fetchone()
+                    if not connection:
+                        raise AnalysisServiceError("CONNECTION_NOT_FOUND")
+                    provider = connection["provider"]
+                    if provider == "chatgpt" or selection.model not in self.settings.allowed_models.get(provider, ()):
+                        raise AnalysisServiceError("MODEL_NOT_ALLOWED")
+                    model_settings[tier] = {"provider": provider, "model": selection.model}
+                    bindings.append((tier, selection.connection_id))
             # Initial feature is US stocks, with SPY as the explicit benchmark.
             # No ticker/catalog mutations and no arbitrary asset assumptions.
             instrument = conn.execute(
@@ -235,29 +244,38 @@ class Repository:
             ).fetchone()["n"]
             if active >= self.settings.max_active_analyses:
                 raise AnalysisServiceError("CAPACITY_FULL", retryable=True)
-            settings = {
-                "quick": {"provider": provider, "model": payload.quick_model},
-                "deep": {"provider": provider, "model": payload.deep_model},
-            }
             row = conn.execute(
                 """INSERT INTO analysis_backend.jobs
-                (id,user_id,connection_id,request_key,request_hash,request,model_settings,auth_type,status,lease_until,hard_deadline)
-                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,'reserved',clock_timestamp()+make_interval(secs => %s),
+                (id,user_id,request_key,request_hash,request,model_settings,auth_type,status,lease_until,hard_deadline)
+                VALUES(%s,%s,%s,%s,%s,%s,%s,'reserved',clock_timestamp()+make_interval(secs => %s),
                        clock_timestamp()+make_interval(secs => %s)) RETURNING *""",
                 (
                     uuid4(),
                     user_id,
-                    payload.connection_id,
                     key,
                     digest,
                     Jsonb(payload.request.model_dump(mode="json")),
-                    Jsonb(settings),
+                    Jsonb(model_settings),
                     payload.auth_type,
                     self.settings.lease_seconds,
                     self.settings.hard_timeout_seconds,
                 ),
             ).fetchone()
+            for tier, connection_id in bindings:
+                conn.execute(
+                    "INSERT INTO analysis_backend.job_model_bindings(user_id,job_id,tier,connection_id) VALUES (%s,%s,%s,%s)",
+                    (user_id, row["id"], tier, connection_id),
+                )
             return row, True
+
+    def execution_bindings(self, user_id, job_id):
+        with self.transaction() as conn:
+            return conn.execute(
+                """SELECT b.tier,c.* FROM analysis_backend.job_model_bindings b
+                JOIN analysis_backend.connections c ON c.user_id=b.user_id AND c.id=b.connection_id
+                WHERE b.user_id=%s AND b.job_id=%s AND c.status='active' ORDER BY b.tier""",
+                (user_id, job_id),
+            ).fetchall()
 
     def next_reserved(self):
         """Discovery only; claim() is the atomic, exactly-one ownership gate.
@@ -269,9 +287,9 @@ class Repository:
             row = conn.execute(
                 """SELECT id FROM analysis_backend.jobs WHERE status='reserved'
                 AND lease_until>clock_timestamp() AND hard_deadline>clock_timestamp()
-                AND (%s::uuid IS NULL OR user_id=%s::uuid)
+                AND (user_id=%s::uuid OR user_id=ANY(%s::uuid[]))
                 ORDER BY created_at,id LIMIT 1""",
-                (self.settings.personal_user_id, self.settings.personal_user_id),
+                (self.settings.personal_user_id, list(self.settings.allowed_user_ids)),
             ).fetchone()
         return row["id"] if row else None
 
@@ -329,7 +347,7 @@ class Repository:
                 """UPDATE analysis_backend.jobs SET status='running',stage='analysis',
                 started_at=clock_timestamp(),lease_token=%s,
                 lease_until=least(hard_deadline,clock_timestamp()+make_interval(secs => %s))
-                WHERE id=%s AND (%s::uuid IS NULL OR user_id=%s::uuid)
+                WHERE id=%s AND (user_id=%s::uuid OR user_id=ANY(%s::uuid[]))
                 AND status='reserved' AND lease_until>clock_timestamp()
                 AND hard_deadline>clock_timestamp() RETURNING *""",
                 (
@@ -337,7 +355,7 @@ class Repository:
                     self.settings.lease_seconds,
                     job_id,
                     self.settings.personal_user_id,
-                    self.settings.personal_user_id,
+                    list(self.settings.allowed_user_ids),
                 ),
             ).fetchone()
         if not row:

@@ -45,7 +45,7 @@ def test_personal_chatgpt_real_reservation_has_no_connection_or_secret(db, tmp_p
     )
     key = uuid4()
     row, created = repo.reserve(db.a, key, payload)
-    assert created and row["auth_type"] == "personal_chatgpt" and row["connection_id"] is None
+    assert created and row["auth_type"] == "personal_chatgpt" and repo.execution_bindings(db.a, row["id"]) == []
     assert repo.next_reserved() == row["id"]
     assert repo.reserve(db.a, key, payload)[1] is False
     with pytest.raises(AnalysisServiceError, match="ACCESS_DENIED"):
@@ -101,12 +101,7 @@ def test_personal_uid_change_never_migrates_old_records_or_claims_them(db, tmp_p
 def test_personal_database_contract_rejects_missing_or_mixed_credentials(db):
     row = db.reserve()
     with pytest.raises(psycopg.errors.CheckViolation):
-        db.sql("UPDATE analysis_backend.jobs SET connection_id=NULL WHERE id=%s", (row["id"],))
-    with pytest.raises(psycopg.errors.CheckViolation):
-        db.sql(
-            "UPDATE analysis_backend.jobs SET auth_type='personal_chatgpt',connection_id=NULL WHERE id=%s",
-            (row["id"],),
-        )
+        db.sql("UPDATE analysis_backend.jobs SET auth_type='personal_chatgpt' WHERE id=%s", (row["id"],))
     assert db.repo.job(db.a, row["id"])["auth_type"] == "api_key"
 
 
@@ -184,6 +179,11 @@ def cluster(tmp_path_factory):
                 .replace("\\set ON_ERROR_STOP on", ""),
                 prepare=False,
             )
+            # Verify the retired personal SQL contract on its matching v1 schema.
+            conn.execute((migrations.parents[1] / "tests/sql/personal_analysis_auth_test.sql").read_text().replace("\\set ON_ERROR_STOP on", ""), prepare=False)
+            conn.execute(
+                (Path(__file__).resolve().parents[1] / "deploy/transitions/20261102000000_multi_user_provider_connections.sql").read_text(), prepare=False,
+            )
         yield dsn
     finally:
         subprocess.run(
@@ -207,17 +207,16 @@ class Fixture:
             return cursor.fetchall() if cursor.description else []
 
     def request(self, **changes):
-        return StartAnalysis(
-            **(
-                {
-                    "request": {"ticker": "NVDA", "analysis_date": "2026-01-01"},
-                    "connection_id": self.connection,
-                    "quick_model": "gpt-5.6-sol",
-                    "deep_model": "gpt-5.6-sol",
-                }
-                | changes
-            )
-        )
+        # Legacy *test helper* arguments map to the new public API contract.
+        connection = changes.pop("connection_id", self.connection)
+        quick = changes.pop("quick_model", "gpt-5.6-sol")
+        deep = changes.pop("deep_model", "gpt-5.6-sol")
+        return StartAnalysis(**{
+            "request": {"ticker": "NVDA", "analysis_date": "2026-01-01"},
+            "models": {"quick": {"connection_id": connection, "model": quick},
+                       "deep": {"connection_id": connection, "model": deep}},
+            **changes,
+        })
 
     def reserve(self, **changes):
         return self.repo.reserve(self.a, uuid4(), self.request(**changes))[0]
@@ -251,7 +250,7 @@ class Fixture:
 @pytest.fixture
 def db(cluster):
     a, b, c = uuid4(), uuid4(), uuid4()
-    repo = Repository(settings(database_url=cluster))
+    repo = Repository(settings(database_url=cluster, allowed_user_ids=(a,b)))
     f = Fixture(cluster, repo, a, b, c)
     f.sql("INSERT INTO auth.users(id) VALUES(%s),(%s)", (a, b))
     f.sql(
@@ -294,7 +293,7 @@ def test_reservation_is_committed_and_owner_isolation(db):
     assert db.repo.connection(db.a, db.connection)["status"] == "active"
 
 
-def test_real_parallel_capacity_never_exceeds_three(db):
+def test_real_parallel_capacity_never_exceeds_one(db):
     barrier = Barrier(6)
 
     def attempt(_):
@@ -306,14 +305,14 @@ def test_real_parallel_capacity_never_exceeds_three(db):
 
     with ThreadPoolExecutor(max_workers=6) as pool:
         results = list(pool.map(attempt, range(6)))
-    assert results.count(True) == 3
-    assert results.count("CAPACITY_FULL") == 3
+    assert results.count(True) == 1
+    assert results.count("CAPACITY_FULL") == 5
     assert (
         db.sql(
             "SELECT count(*) AS n FROM analysis_backend.jobs WHERE user_id=%s AND status='reserved'",
             (db.a,),
         )[0]["n"]
-        == 3
+        == 1
     )
 
 
@@ -595,7 +594,8 @@ def test_api_engine_worker_storage_roundtrip_and_user_b_denial(db, personal, tmp
         with TestClient(app) as api:
             body = db.request().model_dump(mode="json")
             if personal:
-                body.update(auth_type="personal_chatgpt", connection_id=None)
+                body.pop("models", None)
+                body.update(auth_type="personal_chatgpt", quick_model="gpt-5.6-sol", deep_model="gpt-5.6-sol")
             response = api.post(
                 "/v1/analyses",
                 headers={"Authorization": "Bearer A", "Idempotency-Key": str(uuid4())},
@@ -615,7 +615,7 @@ def test_api_engine_worker_storage_roundtrip_and_user_b_denial(db, personal, tmp
             assert report.json()["memory_saved"] is True
             assert api.get(
                 f"/v1/analyses/{job_id}/report", headers={"Authorization": "Bearer B"}
-            ).status_code == (403 if personal else 404)
+            ).status_code == (401 if personal else 404)
             assert (
                 db.sql(
                     "SELECT count(*) AS n FROM analysis_backend.memory WHERE analysis_id=%s",
@@ -635,7 +635,6 @@ def test_api_engine_worker_storage_roundtrip_and_user_b_denial(db, personal, tmp
         "tests/sql/user_watchlist_rpc_test.sql",
         "tests/sql/portfolio_activity_rpc_test.sql",
         "tests/sql/mobile_system_health_rpc_test.sql",
-        "tests/sql/personal_analysis_auth_test.sql",
     ],
 )
 def test_existing_finbot_sql_contracts_still_pass(cluster, filename):

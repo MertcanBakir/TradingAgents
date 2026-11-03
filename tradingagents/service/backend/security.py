@@ -76,11 +76,11 @@ class SupabaseAuthenticator:
             if data.get("role") != "authenticated":
                 raise AnalysisServiceError("AUTHENTICATION_REQUIRED")
             user_id = UUID(data["id"])
-            self.settings.require_owner(user_id)
             # Only the explicitly configured personal owner may use an
             # anonymous Auth session. Never trust a request-supplied UID.
-            if data.get("is_anonymous", False) and self.settings.personal_user_id is None:
+            if data.get("is_anonymous", False) and user_id != self.settings.personal_user_id:
                 raise AnalysisServiceError("AUTHENTICATION_REQUIRED")
+            self.settings.require_owner(user_id)
             return user_id
         except AnalysisServiceError:
             raise

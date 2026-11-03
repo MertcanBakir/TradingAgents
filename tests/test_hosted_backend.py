@@ -47,8 +47,8 @@ def settings(**overrides):
 @pytest.fixture
 def http_api():
     repo, auth, vault, probe, storage, dispatcher = (MagicMock() for _ in range(6))
-    repo.settings = settings()
     user, job_id = uuid4(), uuid4()
+    repo.settings = settings(allowed_user_ids=(user,))
     auth.authenticate.return_value = user
     row = {
         "id": job_id,
@@ -92,9 +92,10 @@ def headers():
 def start_body():
     return {
         "request": {"ticker": "NVDA", "analysis_date": "2026-10-17"},
-        "connection_id": str(uuid4()),
-        "quick_model": "gpt-5.6-sol",
-        "deep_model": "gpt-5.6-sol",
+        "models": {
+            "quick": {"connection_id": str(uuid4()), "model": "gpt-5.6-sol"},
+            "deep": {"connection_id": str(uuid4()), "model": "gpt-5.6-sol"},
+        },
     }
 
 
@@ -187,7 +188,7 @@ def test_body_limit_and_invalid_pagination(http_api):
 def test_provider_options_explicitly_explain_hosted_oauth_boundary(http_api):
     response = http_api.client.get("/v1/providers", headers=headers())
     assert response.status_code == 200
-    assert response.json()["unavailable"]["chatgpt"] == "HOSTED_OAUTH_APPROVAL_REQUIRED"
+    assert response.json()["unavailable"]["chatgpt"] == "PERSONAL_OWNER_ONLY"
 
 
 def test_owner_scoped_status_and_not_ready_report(http_api):
@@ -254,7 +255,7 @@ def test_auth_is_verified_by_fixed_supabase_server_not_decoded_claims():
         )
 
     with httpx.Client(transport=httpx.MockTransport(reply)) as client:
-        assert SupabaseAuthenticator(settings(), client).authenticate("valid-token") == user
+        assert SupabaseAuthenticator(settings(allowed_user_ids=(user,)), client).authenticate("valid-token") == user
 
 
 @pytest.mark.parametrize(
@@ -567,6 +568,7 @@ def test_child_uses_only_owner_key_and_clears_inherited_provider_credentials(tmp
     repo = MagicMock()
     repo.settings = settings()
     user, job_id, token, connection = uuid4(), uuid4(), uuid4(), uuid4()
+    repo.settings = settings(allowed_user_ids=(user,))
     model_settings = {
         "quick": {"provider": "openai", "model": "gpt-5.6-sol"},
         "deep": {"provider": "openai", "model": "gpt-5.6-sol"},
@@ -582,11 +584,10 @@ def test_child_uses_only_owner_key_and_clears_inherited_provider_credentials(tmp
     cipher = SecretVault(repo.settings).encrypt(
         "owner-only-private-key", user_id=user, connection_id=connection, provider="openai"
     )
-    repo.connection.return_value = {
-        "id": connection,
-        "provider": "openai",
-        "secret_ciphertext": cipher,
-    }
+    repo.execution_bindings.return_value = [
+        {"id": connection, "user_id": user, "tier": tier, "provider": "openai", "secret_ciphertext": cipher}
+        for tier in ("quick", "deep")
+    ]
     for name in PROVIDER_API_KEY_ENV.values():
         if name:
             monkeypatch.setenv(name, "inherited-other-user-key")
@@ -600,11 +601,13 @@ def test_child_uses_only_owner_key_and_clears_inherited_provider_credentials(tmp
         def run(self, request, *, user_id, analysis_id):
             import os
 
-            assert os.environ["OPENAI_API_KEY"] == "owner-only-private-key"
+            from tradingagents.llm_clients.tier_credentials import credential_for
+            assert credential_for("quick", "openai") == "owner-only-private-key"
+            assert credential_for("deep", "openai") == "owner-only-private-key"
             assert all(
                 name not in os.environ
                 for name in PROVIDER_API_KEY_ENV.values()
-                if name and name != "OPENAI_API_KEY"
+                if name
             )
             assert "OPENAI_BASE_URL" not in os.environ
             assert os.environ["LANGSMITH_TRACING"] == "false"

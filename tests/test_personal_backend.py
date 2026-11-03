@@ -87,7 +87,7 @@ def test_only_verified_owner_is_accepted(tmp_path, anonymous):
         auth = SupabaseAuthenticator(s, client)
         assert auth.authenticate("real-session") == OWNER
         response["id"] = str(uuid4())
-        with pytest.raises(AnalysisServiceError, match="ACCESS_DENIED"):
+        with pytest.raises(AnalysisServiceError, match="AUTHENTICATION_REQUIRED" if anonymous else "ACCESS_DENIED"):
             auth.authenticate("real-session")
 
 
@@ -120,7 +120,7 @@ def test_start_contract_no_oauth_secret_or_foreign_owner():
         "deep_model": "gpt-5.6-sol",
         "auth_type": "personal_chatgpt",
     }
-    assert StartAnalysis(**body).connection_id is None
+    assert StartAnalysis(**body).models is None
     for change in (
         {"connection_id": str(uuid4())},
         {"user_id": str(OWNER)},

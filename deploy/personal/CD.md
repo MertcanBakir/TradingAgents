@@ -1,3 +1,6 @@
+> Schema v2 multi-user rollout: see [manual transition](../transitions/README.md).
+> Automatic production deployment is held until `BACKEND_SCHEMA_VERSION=2`.
+
 # Personal EC2 continuous delivery
 
 CD publishes the exact Linux ARM64 production image that CI smoke-tested. It

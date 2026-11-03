@@ -48,6 +48,14 @@ jobs:
           CI_RUN_ID: ${{ inputs.ci_run_id || github.event.workflow_run.id }}
         run: python3 deploy/personal/cd_pipeline.py prepare "$CI_RUN_ID"
 
+  transition-notice:
+    needs: candidate
+    if: ${{ needs.candidate.outputs.eligible == 'true' && vars.BACKEND_SCHEMA_VERSION != '2' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record manual transition gate
+        run: echo 'Image publication may proceed. Production deployment is held until the reviewed backend schema v2 transition is complete and BACKEND_SCHEMA_VERSION=2.' >> "$GITHUB_STEP_SUMMARY"
+
   publish:
     needs: candidate
     if: ${{ needs.candidate.outputs.eligible == 'true' && vars.AWS_PUBLISH_ROLE_ARN != '' }}
@@ -104,8 +112,9 @@ jobs:
 
   deploy:
     needs: [candidate, publish]
-    # Kept false during initial setup. Enable only after first-live approval.
-    if: ${{ vars.PRODUCTION_DEPLOY_ENABLED == 'true' }}
+    # Schema v2 needs an explicitly reviewed destructive transition first.
+    # Missing BACKEND_SCHEMA_VERSION keeps existing production untouched.
+    if: ${{ vars.PRODUCTION_DEPLOY_ENABLED == 'true' && vars.BACKEND_SCHEMA_VERSION == '2' }}
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 20

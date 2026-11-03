@@ -152,5 +152,9 @@ def create_tier_client(config: dict, tier: str, **extra) -> BaseLLMClient:
     else:
         base_url = config.get(f"{tier}_think_backend_url")
     kwargs = build_llm_kwargs({**config, "llm_provider": provider})
+    from .tier_credentials import credential_for
+    credential = credential_for(tier, provider)
+    if credential is not None:
+        kwargs["api_key"] = credential
     return create_llm_client(provider=provider, model=config[f"{tier}_think_llm"], base_url=base_url,
                              **kwargs, **extra)

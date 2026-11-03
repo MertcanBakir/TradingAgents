@@ -22,6 +22,9 @@ def public_job(row):
         **{key: row[key] for key in PUBLIC_JOB_COLUMNS},
         "ticker": row["request"]["ticker"],
         "analysis_date": row["request"]["analysis_date"],
+        "auth_type": row.get("auth_type", "api_key"),
+        "models": {tier: {key: value[key] for key in ("provider", "model")}
+                   for tier, value in row.get("model_settings", {}).items() if tier in ("quick", "deep")},
     }
 
 
@@ -123,7 +126,7 @@ def create_app(*, repository, authenticator, vault, probe, storage, dispatcher: 
             if provider != "chatgpt"
         ]
         chatgpt_models = []
-        if repository.settings.personal_chatgpt_enabled:
+        if repository.settings.personal_chatgpt_enabled and user_id == repository.settings.personal_user_id:
             chatgpt_models = repository.provider_models("chatgpt")
             if chatgpt_models:
                 providers.append(
@@ -134,16 +137,17 @@ def create_app(*, repository, authenticator, vault, probe, storage, dispatcher: 
                         "auth_type": "personal_chatgpt",
                     }
                 )
+        personal = repository.settings.personal_chatgpt_enabled and user_id == repository.settings.personal_user_id
         return {
             "providers": providers,
             "unavailable": {
                 **(
                     {"chatgpt": "MODEL_CATALOG_UNAVAILABLE"}
-                    if repository.settings.personal_chatgpt_enabled and not chatgpt_models
+                    if personal and not chatgpt_models
                     else (
                         {}
-                        if repository.settings.personal_chatgpt_enabled
-                        else {"chatgpt": "HOSTED_OAUTH_APPROVAL_REQUIRED"}
+                        if personal
+                        else {"chatgpt": "PERSONAL_OWNER_ONLY"}
                     )
                 ),
                 "ollama": "HOSTED_ENDPOINT_NOT_CONFIGURED",
@@ -170,8 +174,8 @@ def create_app(*, repository, authenticator, vault, probe, storage, dispatcher: 
         ciphertext = vault.encrypt(
             key, user_id=user_id, connection_id=connection_id, provider=payload.provider
         )
-        repository.add_connection(user_id, connection_id, payload.provider, ciphertext)
-        return {"id": connection_id, "provider": payload.provider, "status": "active"}
+        repository.add_connection(user_id, connection_id, payload.provider, ciphertext, name=payload.name.strip())
+        return {"id": connection_id, "provider": payload.provider, "name": payload.name.strip(), "status": "active"}
 
     @app.post("/v1/connections/{connection_id}/verify")
     def verify(connection_id: UUID, user_id: User):
@@ -200,6 +204,8 @@ def create_app(*, repository, authenticator, vault, probe, storage, dispatcher: 
         user_id: User,
         idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     ):
+        if payload.auth_type == "personal_chatgpt":
+            repository.settings.require_personal_owner(user_id)
         row, created = repository.reserve(user_id, idempotency_key, payload)
         if created:
             try:

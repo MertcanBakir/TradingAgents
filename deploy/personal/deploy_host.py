@@ -32,7 +32,10 @@ try:
         clock = conn.execute('SELECT EXTRACT(EPOCH FROM clock_timestamp()) AS value').fetchone()['value']
         row = conn.execute("SELECT EXTRACT(EPOCH FROM refreshed_at) AS value FROM analysis_backend.provider_model_catalog WHERE provider='chatgpt'").fetchone()
         active = conn.execute("SELECT count(*) AS value FROM analysis_backend.jobs WHERE status IN ('reserved','running')").fetchone()['value']
-    print(json.dumps({'ok': True, 'clock': float(clock), 'refreshed': float(row['value']) if row else 0, 'models': len(models), 'active_jobs': active}))
+        revision = 1
+        if conn.execute("SELECT to_regclass('analysis_backend.schema_revision') AS value").fetchone()['value']:
+            revision = conn.execute('SELECT revision AS value FROM analysis_backend.schema_revision WHERE singleton').fetchone()['value']
+    print(json.dumps({'ok': True, 'clock': float(clock), 'refreshed': float(row['value']) if row else 0, 'models': len(models), 'active_jobs': active, 'schema_revision': revision}))
 except Exception:
     print(json.dumps({'ok': False}))
 """
@@ -114,11 +117,13 @@ class Deployment:
         cid = self.container("api")["Id"]
         return json.loads(self.run(["docker", "exec", cid, "python", "-c", PROBE]))
 
-    def verify_image(self, image, commit):
+    def verify_image(self, image, commit, schema_revision=1):
         info = json.loads(self.run(["docker", "image", "inspect", image]))[0]
         if (info["Architecture"] != "arm64" or info["Os"] != "linux"
                 or (info["Config"].get("Labels") or {}).get("org.opencontainers.image.revision") != commit):
             raise DeploymentError("Image architecture or source revision mismatch")
+        if schema_revision >= 2 and (info["Config"].get("Labels") or {}).get("io.finbot.backend-schema") != str(schema_revision):
+            raise DeploymentError("Image and database schema revision mismatch")
 
     def migrate(self, image, *, apply=False):
         api = self.container("api")
@@ -180,7 +185,7 @@ class Deployment:
         if not before.get("ok"):
             raise DeploymentError("Database preflight failed")
         if previous == image:
-            self.verify_image(image, commit)
+            self.verify_image(image, commit, before.get("schema_revision", 1))
             self.migrate(image)
             migrations = self.migrate(image, apply=True)
             self.verify(image, edge, 0)
@@ -188,8 +193,11 @@ class Deployment:
         password = self.run(["aws", "ecr", "get-login-password", "--region", "eu-west-1"])
         self.run(["docker", "login", "--username", "AWS", "--password-stdin", REPOSITORY.split("/")[0]], input_text=password)
         self.run(["docker", "pull", image])
-        self.verify_image(image, commit)
+        self.verify_image(image, commit, before.get("schema_revision", 1))
         self.migrate(image)
+        previous_info = json.loads(self.run(["docker", "image", "inspect", previous]))[0]
+        previous_schema = (previous_info["Config"].get("Labels") or {}).get("io.finbot.backend-schema", "1")
+        rollback_compatible = previous_schema == str(before.get("schema_revision", 1))
         backup_dir = Path(self.config["backup_directory"])
         backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         if backup_dir.is_symlink() or stat.S_IMODE(backup_dir.stat().st_mode) & 0o077:
@@ -208,6 +216,8 @@ class Deployment:
             self.run([*self.compose, "up", "--detach", "--no-deps", "--no-build", "--force-recreate", *SERVICES])
             self.verify(image, edge, before["clock"])
         except Exception:
+            if not rollback_compatible:
+                raise DeploymentError("Deployment failed; previous image is incompatible with the database schema; keep maintenance enabled and recover forward") from None
             atomic_env(self.env_path, previous_text)
             try:
                 self.run([*self.compose, "up", "--detach", "--no-deps", "--no-build", "--force-recreate", *SERVICES])

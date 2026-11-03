@@ -35,6 +35,7 @@ APIProvider = Literal[
 class ConnectionInput(Contract):
     provider: APIProvider
     api_key: SecretStr = Field(exclude=True)
+    name: str = Field(default="", max_length=80, pattern=r"^[^\x00-\x1f\x7f]*$")
 
     @field_validator("api_key")
     @classmethod
@@ -45,21 +46,40 @@ class ConnectionInput(Contract):
         return value
 
 
-class StartAnalysis(Contract):
-    request: AnalysisRequest
-    connection_id: UUID | None = None
-    auth_type: Literal["api_key", "personal_chatgpt"] = "api_key"
-    quick_model: str
-    deep_model: str
+class ModelBinding(Contract):
+    connection_id: UUID
+    model: str
 
-    @field_validator("quick_model", "deep_model")
+    @field_validator("model")
     @classmethod
     def valid_model(cls, value):
         return LLMChoice(provider="openai", model=value).model
 
+
+class ModelBindings(Contract):
+    quick: ModelBinding
+    deep: ModelBinding
+
+
+class StartAnalysis(Contract):
+    request: AnalysisRequest
+    auth_type: Literal["api_key", "personal_chatgpt"] = "api_key"
+    models: ModelBindings | None = None
+    quick_model: str | None = None
+    deep_model: str | None = None
+
+    @field_validator("quick_model", "deep_model")
+    @classmethod
+    def valid_model(cls, value):
+        return LLMChoice(provider="openai", model=value).model if value is not None else None
+
     @model_validator(mode="after")
     def credential_contract(self):
-        if (self.auth_type == "api_key") != (self.connection_id is not None):
+        if self.auth_type == "api_key":
+            valid = self.models is not None and self.quick_model is None and self.deep_model is None
+        else:
+            valid = self.models is None and self.quick_model is not None and self.deep_model is not None
+        if not valid:
             raise ValueError("INVALID_CONNECTION_SELECTION")
         return self
 
@@ -80,6 +100,9 @@ class BackendSettings(Contract):
     daily_connection_limit: int = Field(default=20, ge=1, le=100)
     allow_local_http: bool = False
     # Trusted operator configuration, never accepted in HTTP request bodies.
+    allowed_user_ids: tuple[UUID, ...] = ()
+    # This release intentionally keeps a single globally active analysis.
+    # Queuing/per-user concurrency is a separate rollout.
     personal_user_id: UUID | None = None
     personal_chatgpt_enabled: bool = False
     personal_chatgpt_auth_file: Path | None = None
@@ -87,12 +110,18 @@ class BackendSettings(Contract):
     def require_owner(self, user_id: UUID):
         from ..errors import AnalysisServiceError
 
-        if self.personal_user_id is not None and user_id != self.personal_user_id:
+        if user_id != self.personal_user_id and user_id not in self.allowed_user_ids:
+            raise AnalysisServiceError("ACCESS_DENIED")
+
+    def require_personal_owner(self, user_id: UUID):
+        from ..errors import AnalysisServiceError
+
+        if not self.personal_chatgpt_enabled or user_id != self.personal_user_id:
             raise AnalysisServiceError("ACCESS_DENIED")
 
     @property
     def max_active_analyses(self):
-        return 1 if self.personal_user_id is not None else 3
+        return 1
 
     @model_validator(mode="after")
     def validate_trusted_settings(self):
