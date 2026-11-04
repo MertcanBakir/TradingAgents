@@ -29,6 +29,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from tradingagents.agent_stats import track_data
 from tradingagents.dataflows.date_window import coverage_gap, in_window
 from tradingagents.dataflows.symbols import crypto_base
 
@@ -245,6 +246,7 @@ def _fetch_subreddit_rss(
     return posts
 
 
+@track_data("reddit")
 def fetch_reddit_posts(
     ticker: str,
     subreddits: Iterable[str] | None = None,

@@ -1,5 +1,6 @@
 import logging
 
+from tradingagents.agent_stats import track_data
 from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.errors import (
     NoMarketDataError,
@@ -197,6 +198,7 @@ def no_data_available(error: NoMarketDataError) -> str:
     )
 
 
+@track_data("vendor_router")
 def route_to_vendor(method: str, *args, **kwargs):
     """Route method calls to appropriate vendor implementation with fallback support."""
     category = get_category_for_method(method)

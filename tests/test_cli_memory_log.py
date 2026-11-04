@@ -49,6 +49,9 @@ class _FakeGraph:
         self.calls = []
         self.graph = self
         self.propagator = self
+        from tradingagents.agent_stats import AgentStatsHandler
+
+        self.agent_stats = AgentStatsHandler()
         self.resuming = resuming      # None: checkpointing off
         self._resuming = False
 

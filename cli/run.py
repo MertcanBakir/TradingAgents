@@ -24,6 +24,7 @@ from cli.display import (
 )
 from cli.selections import depth_from_env, get_user_selections, unattended_gaps
 from cli.stats_handler import StatsCallbackHandler
+from tradingagents.agent_stats import append_agent_stats
 from tradingagents.agents.rating import is_review, run_rating
 from tradingagents.dataflows.symbols import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
@@ -346,6 +347,7 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
             final_state = {}
             for chunk in trace:
                 final_state.update(chunk)
+            final_state["agent_stats"] = graph.agent_stats.snapshot()
 
             # Clean run: log the decision, then drop this run's checkpoint so a
             # later run starts fresh. A mid-stream failure skips both, keeping
@@ -368,7 +370,11 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
 
         for section in message_buffer.report_sections:
             if section in final_state:
-                message_buffer.update_report_section(section, final_state[section])
+                content = final_state[section]
+                if section == "final_trade_decision" and content:
+                    language = "tr" if config.get("output_language") == "Turkish" else "en"
+                    content = append_agent_stats(content, final_state["agent_stats"], language)
+                message_buffer.update_report_section(section, content)
 
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
@@ -461,4 +467,5 @@ def _offer_reports(final_state, graph, ticker, save=None, show=None, html=None):
     if show is None:
         show = typer.prompt("\nDisplay full report on screen?", default="Y").strip().upper() in ("Y", "YES", "")
     if show:
-        display_complete_report(final_state)
+        language = "tr" if graph.config.get("output_language") == "Turkish" else "en"
+        display_complete_report(final_state, language=language)

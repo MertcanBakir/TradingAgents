@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import tradingagents
+from tradingagents.agent_stats import AgentStatsHandler
 from tradingagents.agents.context import build_instrument_context, resolve_instrument_identity
 from tradingagents.agents.rating import run_rating
 from tradingagents.dataflows.config import run_config, run_config_context, set_config
@@ -73,6 +74,7 @@ class TradingAgentsGraph:
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
+        self.agent_stats = AgentStatsHandler()
 
         # CLI compatibility remains the default. Headless workers bind their
         # own run_config and must not mutate another caller's global defaults.
@@ -381,7 +383,8 @@ class TradingAgentsGraph:
                    checkpoint_thread_id: str | None = None, portfolio=None):
         """Execute the graph and write the resulting state to disk and memory log."""
         init_agent_state = self.create_run_state(company_name, trade_date, asset_type, portfolio)
-        args = self.propagator.get_graph_args()
+        self.agent_stats.reset()
+        args = self.propagator.get_graph_args(callbacks=[self.agent_stats])
 
         # Inject the checkpoint thread_id (from checkpoint_scope) so the same
         # ticker+date+graph-shape resumes; a different one starts fresh (#1089).
@@ -404,6 +407,7 @@ class TradingAgentsGraph:
         else:
             final_state = self.graph.invoke(graph_input, **args)
 
+        final_state["agent_stats"] = self.agent_stats.snapshot()
         self.record_decision(company_name, trade_date, final_state)
 
         # Clear checkpoint on successful completion to avoid stale state.
@@ -422,7 +426,11 @@ class TradingAgentsGraph:
         analysts' reports only when the slowest has finished, so their messages
         and reports come from their own finished steps ("tasks") as they happen.
         """
-        args = {**args, "stream_mode": ["values", "tasks"]}
+        self.agent_stats.reset()
+        from langchain_core.runnables.config import merge_configs
+
+        config = merge_configs(args.get("config"), {"callbacks": [self.agent_stats]})
+        args = {**args, "config": config, "stream_mode": ["values", "tasks"]}
         # The graph's own config serves every tool call, as in propagate(), even
         # when the process-wide config has changed since. Each step runs in the
         # run's context, so the caller keeps its own between steps.
@@ -470,6 +478,7 @@ class TradingAgentsGraph:
             "final_trade_decision": final_state["final_trade_decision"],
             "final_rating": run_rating(final_state),
             "run_settings": self.run_settings(),
+            "agent_stats": final_state.get("agent_stats", []),
         }
 
         # A ticker that would escape the results directory is rejected.

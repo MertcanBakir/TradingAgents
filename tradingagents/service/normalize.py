@@ -128,6 +128,8 @@ def normalize_result(
         },
         ensure_ascii=False,
     )
+    from tradingagents.agent_stats import append_agent_stats
+
     values = [
         ("executive_summary", _summary(decision), {}),
         ("technical", _text(state.get("market_report")), {}),
@@ -142,7 +144,9 @@ def normalize_result(
             {"research_manager": text} if (text := _text(state.get("investment_plan"))) else {},
         ),
         ("risk", None, risk_parts),
-        ("final_assessment", decision, {}),
+        ("final_assessment", redact_text(append_agent_stats(
+            decision, state.get("agent_stats"), request.language
+        )), {}),
         ("provenance", redact_text(provenance), {}),
         ("disclaimer", DISCLAIMER[request.language], {}),
     ]

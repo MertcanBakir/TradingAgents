@@ -15,6 +15,7 @@ from collections.abc import Iterable
 import pandas as pd
 from stockstats import wrap
 
+from tradingagents.agent_stats import track_data
 from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.symbols import normalize_symbol
 from tradingagents.dataflows.vendors.yahoo.common import price_text
@@ -64,6 +65,7 @@ def _fmt(value) -> str:
     return str(value)
 
 
+@track_data("verified_market_snapshot")
 def build_verified_market_snapshot(
     symbol: str,
     as_of_date: str,

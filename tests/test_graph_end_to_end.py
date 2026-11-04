@@ -172,6 +172,9 @@ def test_headless_service_real_graph_injects_user_memory_without_cli_side_effect
         AnalysisRequest(ticker="NVDA", analysis_date=TRADE_DATE), user_id=user)
     assert result.quality == "complete" and result.memory_saved
     assert result.final_rating == "Overweight" and result.trade_action == "Buy"
+    decision = next(s.content_markdown for s in result.sections if s.code == "final_assessment")
+    assert "Agent Çalışma İstatistikleri" in decision
+    assert "Market Analyst" in decision
     assert any("HEADLESS_MEMORY_LESSON" in prompt for prompt in captured)
     assert before == data_config._config
     assert cli_memory.read_text() == "CLI_MEMORY_UNCHANGED"
@@ -495,3 +498,38 @@ def test_configured_window_lessons_are_hidden_until_the_exit_date(tmp_path, monk
     assert not graph.memory_log.load_entries()[0]["pending"]
     on_exit = graph._memory_step({"company_of_interest": "NVDA", "trade_date": TRADE_DATE})
     assert on_exit["past_context"]
+
+
+@pytest.mark.parametrize("debug", [False, True])
+def test_agent_stats_cover_parallel_nodes_tools_and_reset(tmp_path, monkeypatch, offline, debug):
+    graph = _graph(tmp_path, monkeypatch, ScriptedModel(), debug=debug)
+    state, _ = graph.propagate("NVDA", TRADE_DATE)
+    rows = {r["agent"]: r for r in state["agent_stats"]}
+    assert set(rows) == {
+        "Market Analyst", "Sentiment Analyst", "News Analyst", "Fundamentals Analyst",
+        "Bull Researcher", "Bear Researcher", "Research Manager", "Trader",
+        "Aggressive Analyst", "Conservative Analyst", "Neutral Analyst", "Portfolio Manager", "Memory Log",
+    }
+    for row in rows.values():
+        assert row["status"] == "completed"
+        assert row["duration_seconds"] >= 0
+    market = rows["Market Analyst"]
+    assert market["llm_calls"] == 2
+    assert market["usage_missing"] == 2
+    assert market["tools"] == {"get_stock_data": 1, "get_indicators": 1, "get_verified_market_snapshot": 1}
+    assert rows["Sentiment Analyst"]["tools"] == {}
+    assert rows["Sentiment Analyst"]["data_accesses"].get("get_news") == 1
+    assert rows["Bull Researcher"]["llm_calls"] == 1
+    # Reusing a graph must not carry measurements from the previous run.
+    again, _ = graph.propagate("NVDA", TRADE_DATE)
+    next_rows = {r["agent"]: r for r in again["agent_stats"]}
+    assert next_rows["Market Analyst"]["llm_calls"] == market["llm_calls"]
+
+
+def test_agent_stats_accumulate_real_debate_rounds(tmp_path, monkeypatch, offline):
+    graph = _graph(tmp_path, monkeypatch, ScriptedModel(), max_debate_rounds=2, max_risk_discuss_rounds=2)
+    state, _ = graph.propagate("NVDA", TRADE_DATE)
+    rows = {r["agent"]: r for r in state["agent_stats"]}
+    for agent in ("Bull Researcher", "Bear Researcher", "Aggressive Analyst", "Conservative Analyst", "Neutral Analyst"):
+        assert rows[agent]["llm_calls"] == 2
+        assert len(rows[agent]["runs"]) == 2

@@ -9,6 +9,7 @@ run produces the same on-disk report tree a CLI run does.
 from datetime import datetime
 from pathlib import Path
 
+from tradingagents.agent_stats import append_agent_stats
 from tradingagents.agents.rating import run_rating
 
 
@@ -73,7 +74,7 @@ _SECTIONS = (
 )
 
 
-def _report_parts(final_state: dict) -> list[tuple[str, str, list[tuple[str, str, str]]]]:
+def _report_parts(final_state: dict, language="en") -> list[tuple[str, str, list[tuple[str, str, str]]]]:
     """The sections with something to say: (heading, folder, [(agent, file, text)])."""
     parts = []
     for heading, folder, agents in _SECTIONS:
@@ -83,6 +84,8 @@ def _report_parts(final_state: dict) -> list[tuple[str, str, list[tuple[str, str
             for key in path:
                 value = (value or {}).get(key)
             if value:
+                if path == ("final_trade_decision",):
+                    value = append_agent_stats(value, final_state.get("agent_stats"), language)
                 written.append((agent, filename, value))
         if written:
             parts.append((heading, folder, written))
@@ -101,7 +104,8 @@ def write_report_tree(final_state: dict, ticker: str, save_path, settings: dict 
     """
     save_path = Path(save_path)
     save_path.mkdir(parents=True, exist_ok=True)
-    parts = _report_parts(final_state)
+    language = "tr" if (settings or {}).get("output_language") == "Turkish" else "en"
+    parts = _report_parts(final_state, language)
     sections = []
     for heading, folder, written in parts:
         (save_path / folder).mkdir(exist_ok=True)

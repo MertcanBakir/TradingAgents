@@ -215,6 +215,9 @@ def test_completed_run_clears_the_checkpoint_it_wrote(tmp_path, monkeypatch):
     graph = _bare_graph(tmp_path)
     graph.config.update({"checkpoint_enabled": True, "data_cache_dir": str(tmp_path),
                          "results_dir": str(tmp_path)})
+    from tradingagents.agent_stats import AgentStatsHandler
+
+    graph.agent_stats = AgentStatsHandler()
     graph.debug = False
     graph._resuming = False
     graph.propagator.get_graph_args = lambda callbacks=None: {}
