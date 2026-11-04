@@ -103,7 +103,7 @@ def test_save_and_show_answer_the_questions_after_the_run(monkeypatch, tmp_path)
     monkeypatch.setattr(run.typer, "prompt", no_prompt)
     monkeypatch.setattr(run, "_graphical_browser", lambda: _Browser())   # even at a desktop
     shown = []
-    monkeypatch.setattr(run, "display_complete_report", lambda state: shown.append(state))
+    monkeypatch.setattr(run, "display_complete_report", lambda state, **kwargs: shown.append(state))
     from tradingagents.graph.trading_graph import TradingAgentsGraph
 
     graph = object.__new__(TradingAgentsGraph)
@@ -229,7 +229,7 @@ STATE = {"market_report": "M", "final_trade_decision": "**Rating**: Hold"}
 
 @pytest.mark.unit
 def test_a_saved_report_includes_the_html_page_unless_declined(monkeypatch, tmp_path):
-    monkeypatch.setattr(run, "display_complete_report", lambda state: None)
+    monkeypatch.setattr(run, "display_complete_report", lambda state, **kwargs: None)
 
     run._offer_reports(STATE, _report_graph(tmp_path / "a"), "NVDA", save=True, show=False)
     run._offer_reports(STATE, _report_graph(tmp_path / "b"), "NVDA", save=True, show=False, html=False)
@@ -250,7 +250,7 @@ def _answer(monkeypatch, answers):
         raise AssertionError(f"unexpected question: {text}")
 
     monkeypatch.setattr(run.typer, "prompt", prompt)
-    monkeypatch.setattr(run, "display_complete_report", lambda state: None)
+    monkeypatch.setattr(run, "display_complete_report", lambda state, **kwargs: None)
     return asked
 
 

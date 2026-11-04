@@ -75,6 +75,11 @@ from the existing final-decision header; no additional summarizer/model call.
 Missing text remains null and produces a warning when required. Provenance does
 not claim independently verified data freshness. Treat Markdown as untrusted text.
 
+The final assessment ends with per-agent timings, reported input/output tokens,
+and tool names with logical call counts when measurements are available. Missing
+provider usage is marked with `?`. Parallel durations overlap. A resumed local
+CLI run measures only steps executed after resuming.
+
 Raw state/messages/prompts, endpoints, paths, user IDs and credentials are not in
 the output contract. Known environment secrets and common token formats are
 additionally redacted from report text. Errors use domain codes, not raw traces.

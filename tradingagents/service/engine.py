@@ -9,7 +9,7 @@ from time import monotonic
 from uuid import UUID, uuid4
 
 from .config import build_graph_config
-from .errors import AnalysisServiceError, classify_error
+from .errors import AnalysisServiceError, classify_error, redact_text
 from .memory import BoundMemory, MemoryDecision, MemoryRepository
 from .models import AnalysisRequest, AnalysisResult, ServiceSettings
 from .normalize import normalize_result
@@ -78,9 +78,7 @@ class AnalysisEngine:
                     ticker=request.ticker,
                     analysis_date=request.analysis_date,
                     rating=result.final_rating,
-                    decision=next(
-                        s.content_markdown for s in result.sections if s.code == "final_assessment"
-                    ),
+                    decision=redact_text(state["final_trade_decision"].strip()),
                     created_at=result.started_at,
                     evaluation_trading_days=self.settings.evaluation_trading_days,
                     benchmark=self.settings.benchmark,

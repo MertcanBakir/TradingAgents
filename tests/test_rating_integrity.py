@@ -147,6 +147,9 @@ def test_the_cli_says_when_a_run_produced_no_usable_rating(monkeypatch, tmp_path
             yield [], {"messages": [], "final_trade_decision": REFUSAL, "final_rating": RATING_REVIEW}
 
     fake = _Graph()
+    from tradingagents.agent_stats import AgentStatsHandler
+
+    fake.agent_stats = AgentStatsHandler()
     fake.graph = fake
     fake.propagator = fake
     monkeypatch.setattr(cli_run, "TradingAgentsGraph", lambda *a, **k: fake)

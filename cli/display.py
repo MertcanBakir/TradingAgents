@@ -15,6 +15,7 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
+from tradingagents.agent_stats import append_agent_stats
 from tradingagents.graph.analyst_execution import (
     ANALYST_NODE_SPECS,
     AnalystExecutionPlan,
@@ -376,7 +377,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     layout["footer"].update(Panel(stats_table, border_style="grey50"))
 
 
-def display_complete_report(final_state):
+def display_complete_report(final_state, language="en"):
     """Display the complete analysis report sequentially (avoids truncation)."""
     console.print()
     console.print(Rule("Complete Analysis Report", style="bold green"))
@@ -434,7 +435,10 @@ def display_complete_report(final_state):
     # V. Portfolio Manager Decision
     if final_state.get("final_trade_decision"):
         console.print(Panel("[bold]V. Portfolio Manager Decision[/bold]", border_style="green"))
-        console.print(Panel(Markdown(final_state["final_trade_decision"]), title="Portfolio Manager", border_style="blue", padding=(1, 2)))
+        decision = append_agent_stats(
+            final_state["final_trade_decision"], final_state.get("agent_stats"), language
+        )
+        console.print(Panel(Markdown(decision), title="Portfolio Manager", border_style="blue", padding=(1, 2)))
 
 
 def update_research_team_status(status):
