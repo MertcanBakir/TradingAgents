@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from tradingagents.horizons import AnalysisHorizon
+
 Analyst = Literal["market", "social", "news", "fundamentals"]
 Rating = Literal["Buy", "Overweight", "Hold", "Underweight", "Sell", "REVIEW"]
 Provider = Literal[
@@ -33,6 +35,7 @@ def validate_ticker(value: str) -> str:
 class AnalysisRequest(Contract):
     ticker: str
     analysis_date: date
+    analysis_horizon: AnalysisHorizon
     profile: Literal["standard"] = "standard"
     language: Literal["tr", "en"] = "tr"
     analysts: tuple[Analyst, ...] = ("market", "social", "news", "fundamentals")
@@ -126,6 +129,7 @@ class AnalysisResult(Contract):
     analysis_id: UUID
     ticker: str
     analysis_date: date
+    analysis_horizon: AnalysisHorizon
     final_rating: Rating
     trade_action: Literal["Buy", "Hold", "Sell"] | None
     quality: Literal["complete", "partial", "needs_review"]

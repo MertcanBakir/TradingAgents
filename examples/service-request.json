@@ -1,6 +1,7 @@
 {
   "ticker": "NVDA",
   "analysis_date": "2026-10-17",
+  "analysis_horizon": "medium_3m",
   "profile": "standard",
   "language": "tr"
 }

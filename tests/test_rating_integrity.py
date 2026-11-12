@@ -162,11 +162,11 @@ def test_the_cli_says_when_a_run_produced_no_usable_rating(monkeypatch, tmp_path
     monkeypatch.setattr(cli_run, "display_complete_report", lambda *a, **k: None)
     monkeypatch.setattr(m.typer, "prompt", lambda *a, **k: "N")
     monkeypatch.setattr(cli_run, "get_user_selections", lambda flags=None: {
-        "ticker": "NVDA", "analysis_date": "2026-01-10",
+        "ticker": "NVDA", "analysis_date": "2026-01-10", "analysis_horizon": "medium_3m",
         "analysts": [AnalystType.MARKET], "asset_type": "stock",
     })
     monkeypatch.setattr(cli_run, "_build_run_config", lambda s, c: {
-        "data_cache_dir": str(tmp_path / "c"), "results_dir": str(tmp_path / "r")})
+        "data_cache_dir": str(tmp_path / "c"), "results_dir": str(tmp_path / "r"), "analysis_horizon": "medium_3m"})
 
     cli_run.run_analysis()
 
@@ -200,6 +200,7 @@ def test_a_decision_prompt_states_the_shape_of_its_answer(module, factory, must_
 
     state = {
         "company_of_interest": "NVDA", "trade_date": "2026-08-14", "asset_type": "stock",
+        "analysis_horizon": "medium_3m",
         "instrument_context": "", "market_report": "M", "sentiment_report": "S",
         "news_report": "N", "fundamentals_report": "F", "investment_plan": "P",
         "trader_investment_plan": "T", "past_context": "", "portfolio_context": "",

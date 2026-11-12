@@ -93,7 +93,7 @@ keys remain in protected server settings, outside the database.
 ```json
 {
   "auth_type":"api_key",
-  "request":{"ticker":"NVDA","analysis_date":"2026-11-02","language":"tr"},
+  "request":{"ticker":"NVDA","analysis_date":"2026-11-02", "analysis_horizon": "medium_3m","language":"tr"},
   "models":{
     "quick":{"connection_id":"<OpenAI connection UUID>","model":"<enabled OpenAI model>"},
     "deep":{"connection_id":"<Anthropic connection UUID>","model":"<enabled Anthropic model>"}
@@ -117,7 +117,7 @@ The existing owner-only personal ChatGPT body remains:
 ```json
 {
   "auth_type":"personal_chatgpt",
-  "request":{"ticker":"NVDA","analysis_date":"2026-11-02"},
+  "request":{"ticker":"NVDA","analysis_date":"2026-11-02", "analysis_horizon": "medium_3m"},
   "quick_model":"<owner catalog model>",
   "deep_model":"<owner catalog model>"
 }
@@ -125,6 +125,19 @@ The existing owner-only personal ChatGPT body remains:
 
 It contains no `models` or connection IDs. Mixing personal ChatGPT with API-key
 providers within one analysis is deliberately unsupported in this release.
+
+
+In the analysis form, ask for the horizon immediately after the analysis date.
+Both authentication modes require `request.analysis_horizon`:
+
+| Value | Turkish label |
+| --- | --- |
+| `short_1m` | Kısa (1 ay) |
+| `medium_3m` | Orta (3 ay) |
+| `long_12m` | Uzun (12 ay) |
+
+Missing or unsupported values return HTTP 422 with `INVALID_REQUEST`.
+New jobs and reports include `analysis_horizon`.
 
 202 returns job metadata. `GET /v1/analyses`, `GET /v1/analyses/{id}` and
 `GET /v1/analyses/{id}/report` remain owner-scoped. Job metadata includes

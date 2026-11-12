@@ -22,6 +22,7 @@ def public_job(row):
         **{key: row[key] for key in PUBLIC_JOB_COLUMNS},
         "ticker": row["request"]["ticker"],
         "analysis_date": row["request"]["analysis_date"],
+        "analysis_horizon": row["request"].get("analysis_horizon"),
         "auth_type": row.get("auth_type", "api_key"),
         "models": {tier: {key: value[key] for key in ("provider", "model")}
                    for tier, value in row.get("model_settings", {}).items() if tier in ("quick", "deep")},

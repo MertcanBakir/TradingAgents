@@ -33,7 +33,7 @@ USER_B = UUID("22222222-2222-4222-8222-222222222222")
 
 @pytest.fixture
 def request_data():
-    return {"ticker": "NVDA", "analysis_date": "2026-10-17"}
+    return {"ticker": "NVDA", "analysis_date": "2026-10-17", "analysis_horizon": "medium_3m"}
 
 
 @pytest.fixture
@@ -152,6 +152,7 @@ def test_server_config_is_bounded_and_deeply_isolated(
     monkeypatch.setitem(DEFAULT_CONFIG, "backend_url", "https://password:secret@example.com")
     before = deepcopy(DEFAULT_CONFIG)
     a = build_graph_config(AnalysisRequest(**request_data), settings, tmp_path / "a")
+    assert a["analysis_horizon"] == "medium_3m"
     b = build_graph_config(AnalysisRequest(**request_data), settings, tmp_path / "b")
     a["data_vendors"]["news_data"] = "changed"
     assert b["data_vendors"] != a["data_vendors"]

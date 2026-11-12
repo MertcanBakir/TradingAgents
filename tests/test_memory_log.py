@@ -67,6 +67,7 @@ def _price_df(prices, start="2026-01-05"):
 def _make_pm_state(past_context=""):
     """Minimal AgentState dict for portfolio_manager_node."""
     return {
+        "analysis_horizon": "medium_3m",
         "company_of_interest": "NVDA",
         "past_context": past_context,
         "risk_debate_state": {
@@ -776,13 +777,13 @@ class TestPortfolioManagerInjection:
 
     def test_past_context_in_initial_state(self):
         propagator = Propagator()
-        state = propagator.create_initial_state("NVDA", "2026-01-10", past_context="some context")
+        state = propagator.create_initial_state("NVDA", "2026-01-10", analysis_horizon="medium_3m", past_context="some context")
         assert "past_context" in state
         assert state["past_context"] == "some context"
 
     def test_past_context_defaults_to_empty(self):
         propagator = Propagator()
-        state = propagator.create_initial_state("NVDA", "2026-01-10")
+        state = propagator.create_initial_state("NVDA", "2026-01-10", analysis_horizon="medium_3m")
         assert state["past_context"] == ""
 
     # PM prompt
@@ -815,7 +816,6 @@ class TestPortfolioManagerInjection:
             executive_summary="Build position gradually over the next two weeks.",
             investment_thesis="AI capex cycle remains intact; institutional flows constructive.",
             price_target=215.0,
-            time_horizon="3-6 months",
         )
         llm = _structured_pm_llm(captured, decision)
         pm_node = create_portfolio_manager(llm)
@@ -825,7 +825,7 @@ class TestPortfolioManagerInjection:
         assert "**Executive Summary**: Build position gradually" in md
         assert "**Investment Thesis**: AI capex cycle" in md
         assert "**Price Target**: 215.0" in md
-        assert "**Time Horizon**: 3-6 months" in md
+        assert "**Time Horizon**: Medium (3 months)" in md
 
     def test_pm_falls_back_to_freetext_when_structured_unavailable(self):
         """If a provider does not support with_structured_output, the agent
@@ -837,7 +837,7 @@ class TestPortfolioManagerInjection:
         llm.invoke.return_value = MagicMock(content=plain_response)
         pm_node = create_portfolio_manager(llm)
         result = pm_node(_make_pm_state())
-        assert result["final_trade_decision"] == plain_response
+        assert result["final_trade_decision"] == plain_response + "\n\n**Time Horizon**: Medium (3 months)"
 
     # get_past_context ordering and limits
 
@@ -934,6 +934,7 @@ class TestLegacyRemoval:
             "final_rating": "Buy",
             "company_of_interest": "NVDA",
             "trade_date": "2026-01-10",
+            "analysis_horizon": "medium_3m",
             "market_report": "",
             "sentiment_report": "",
             "news_report": "",

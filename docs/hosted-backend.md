@@ -57,7 +57,7 @@ Start body:
   "connection_id": "a-user-owned-connection-uuid",
   "quick_model": "an-operator-allowed-model",
   "deep_model": "an-operator-allowed-model",
-  "request": {"ticker": "NVDA", "analysis_date": "2026-10-19", "profile": "standard", "language": "tr"}
+  "request": {"ticker": "NVDA", "analysis_date": "2026-10-19", "analysis_horizon": "medium_3m", "profile": "standard", "language": "tr"}
 }
 ```
 

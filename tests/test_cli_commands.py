@@ -25,7 +25,7 @@ calls: list = []
 @pytest.mark.unit
 def test_no_arguments_still_runs_an_analysis(runner):
     assert runner.invoke(m.app, []).exit_code == 0
-    no_flags = {"ticker": None, "date": None, "analysts": None, "save": None, "show": None, "html": None}
+    no_flags = {"ticker": None, "date": None, "horizon": None, "analysts": None, "save": None, "show": None, "html": None}
     assert calls == [("analysis", {"checkpoint": None, "portfolio": None, "flags": no_flags})]
 
 
@@ -41,7 +41,7 @@ def test_backtest_does_not_also_run_an_analysis(runner, monkeypatch, tmp_path):
     monkeypatch.setattr(m, "run_backtest", lambda *a, **kw: swept.append((a, kw)) or _Result(tmp_path))
     monkeypatch.setattr(m, "summarize", lambda log: _Summary())
 
-    result = runner.invoke(m.app, ["backtest", "NVDA,AAPL", "--start", "2026-06-01",
+    result = runner.invoke(m.app, ["backtest", "--horizon", "medium_3m", "NVDA,AAPL", "--start", "2026-06-01",
                                    "--end", "2026-06-15", "--every", "7"])
 
     assert result.exit_code == 0, result.output
@@ -54,7 +54,7 @@ def test_backtest_does_not_also_run_an_analysis(runner, monkeypatch, tmp_path):
 
 @pytest.mark.unit
 def test_backtest_reports_a_bad_date_instead_of_a_traceback(runner):
-    result = runner.invoke(m.app, ["backtest", "NVDA", "--start", "June", "--end", "2026-06-15"])
+    result = runner.invoke(m.app, ["backtest", "--horizon", "medium_3m", "NVDA", "--start", "June", "--end", "2026-06-15"])
     assert result.exit_code == 1
     assert "YYYY-MM-DD" in result.output
 
@@ -106,7 +106,7 @@ def test_backtest_can_continue_an_interrupted_sweep(runner, monkeypatch, tmp_pat
     monkeypatch.setattr(m, "run_backtest", lambda *a, **kw: swept.append(kw) or _Result(tmp_path))
     monkeypatch.setattr(m, "summarize", lambda log: _Summary())
 
-    result = runner.invoke(m.app, ["backtest", "NVDA", "--start", "2026-06-01",
+    result = runner.invoke(m.app, ["backtest", "--horizon", "medium_3m", "NVDA", "--start", "2026-06-01",
                                    "--end", "2026-06-08", "--run-id", "20260617_120000"])
 
     assert result.exit_code == 0, result.output
@@ -115,8 +115,8 @@ def test_backtest_can_continue_an_interrupted_sweep(runner, monkeypatch, tmp_pat
 
 @pytest.mark.unit
 @pytest.mark.parametrize("args, expected", [
-    (["backtest", "NVDA", "--start", "2026-08-01", "--end", "2026-06-08"], "before"),
-    (["backtest", ",,", "--start", "2026-06-01", "--end", "2026-06-08"], "ticker"),
+    (["backtest", "--horizon", "medium_3m", "NVDA", "--start", "2026-08-01", "--end", "2026-06-08"], "before"),
+    (["backtest", "--horizon", "medium_3m", ",,", "--start", "2026-06-01", "--end", "2026-06-08"], "ticker"),
 ])
 def test_backtest_rejects_input_that_would_sweep_nothing(runner, args, expected):
     """An inverted range or an empty ticker list reported a clean zero-cell run,
@@ -133,7 +133,7 @@ def test_backtest_reports_a_setup_failure_in_one_line(runner, monkeypatch):
         raise ValueError("API key for provider 'openai' is not set")
 
     monkeypatch.setattr(m, "run_backtest", _explode)
-    result = runner.invoke(m.app, ["backtest", "NVDA", "--start", "2026-06-01", "--end", "2026-06-08"])
+    result = runner.invoke(m.app, ["backtest", "--horizon", "medium_3m", "NVDA", "--start", "2026-06-01", "--end", "2026-06-08"])
 
     assert result.exit_code == 1
     assert "API key" in result.output
@@ -150,7 +150,7 @@ def test_backtest_shows_each_cell_and_how_to_continue(runner, monkeypatch, tmp_p
     monkeypatch.setattr(m, "run_backtest", sweep)
     monkeypatch.setattr(m, "summarize", lambda log: _Summary())
 
-    result = runner.invoke(m.app, ["backtest", "NVDA", "--start", "2026-06-01", "--end", "2026-06-08"])
+    result = runner.invoke(m.app, ["backtest", "--horizon", "medium_3m", "NVDA", "--start", "2026-06-01", "--end", "2026-06-08"])
 
     assert "[1/2] NVDA 2026-06-01" in result.output and "[2/2] NVDA 2026-06-08" in result.output
     assert f"--run-id {_Result(tmp_path).run_id}" in result.output
@@ -166,7 +166,7 @@ def test_backtest_takes_its_analysts_as_an_analysis_does(runner, monkeypatch, tm
     monkeypatch.setattr(m, "run_backtest", lambda *a, **kw: swept.append(kw) or _Result(tmp_path))
     monkeypatch.setattr(m, "summarize", lambda log: _Summary())
 
-    result = runner.invoke(m.app, ["backtest", "NVDA", "--start", "2026-06-01", "--end", "2026-06-01", *args])
+    result = runner.invoke(m.app, ["backtest", "--horizon", "medium_3m", "NVDA", "--start", "2026-06-01", "--end", "2026-06-01", *args])
 
     assert result.exit_code == 0, result.output
     assert swept[0]["selected_analysts"] == analysts
@@ -180,7 +180,7 @@ def test_backtest_takes_its_analysts_as_an_analysis_does(runner, monkeypatch, tm
 def test_backtest_refuses_a_selection_before_the_sweep(runner, monkeypatch, args):
     monkeypatch.setattr(m, "run_backtest", lambda *a, **kw: pytest.fail("the sweep started"))
 
-    result = runner.invoke(m.app, ["backtest", "NVDA", "--start", "2026-06-01", "--end", "2026-06-01", *args])
+    result = runner.invoke(m.app, ["backtest", "--horizon", "medium_3m", "NVDA", "--start", "2026-06-01", "--end", "2026-06-01", *args])
 
     assert result.exit_code == 1
 

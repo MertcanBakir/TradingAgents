@@ -59,7 +59,7 @@ def http_api():
         "started_at": None,
         "finished_at": None,
         "error_code": None,
-        "request": {"ticker": "NVDA", "analysis_date": "2026-10-17"},
+        "request": {"ticker": "NVDA", "analysis_date": "2026-10-17", "analysis_horizon": "medium_3m"},
     }
     repo.reserve.return_value = (row, True)
     app = create_app(
@@ -91,7 +91,7 @@ def headers():
 
 def start_body():
     return {
-        "request": {"ticker": "NVDA", "analysis_date": "2026-10-17"},
+        "request": {"ticker": "NVDA", "analysis_date": "2026-10-17", "analysis_horizon": "medium_3m"},
         "models": {
             "quick": {"connection_id": str(uuid4()), "model": "gpt-5.6-sol"},
             "deep": {"connection_id": str(uuid4()), "model": "gpt-5.6-sol"},
@@ -360,7 +360,7 @@ def worker_result(job_id):
     now = datetime.now(UTC)
     return normalize_result(
         state=state.__wrapped__(),
-        request=AnalysisRequest(ticker="NVDA", analysis_date="2026-10-17"),
+        request=AnalysisRequest(ticker="NVDA", analysis_date="2026-10-17", analysis_horizon="medium_3m"),
         settings=ServiceSettings(
             quick={"provider": "openai", "model": "gpt-5.6-sol"},
             deep={"provider": "openai", "model": "gpt-5.6-sol"},
@@ -576,7 +576,7 @@ def test_child_uses_only_owner_key_and_clears_inherited_provider_credentials(tmp
         "id": job_id,
         "user_id": user,
         "connection_id": connection,
-        "request": {"ticker": "NVDA", "analysis_date": "2026-10-17"},
+        "request": {"ticker": "NVDA", "analysis_date": "2026-10-17", "analysis_horizon": "medium_3m"},
         "model_settings": model_settings,
     }
     repo.transaction.return_value.__enter__.return_value.execute.return_value.fetchone.return_value = row
@@ -631,3 +631,18 @@ def test_child_uses_only_owner_key_and_clears_inherited_provider_credentials(tmp
     module.run_child(repo, job_id, token, output)
     assert "private-key" not in output.read_text()
     assert output.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("horizon", [None, "invalid"])
+def test_api_requires_supported_analysis_horizon(http_api, horizon):
+    body = start_body()
+    if horizon is None:
+        body["request"].pop("analysis_horizon")
+    else:
+        body["request"]["analysis_horizon"] = horizon
+
+    response = http_api.client.post("/v1/analyses", headers=headers(), json=body)
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "INVALID_REQUEST"
+    http_api.repo.reserve.assert_not_called()

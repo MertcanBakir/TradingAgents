@@ -16,7 +16,7 @@ UNATTENDED_ENV = {
     "TRADINGAGENTS_LLM_PROVIDER": "openai",
     "TRADINGAGENTS_QUICK_THINK_LLM": "gpt-6-luna",
 }
-FLAGS = {"ticker": "NVDA", "date": "2026-09-23", "analysts": "market,news", "save": True, "show": False}
+FLAGS = {"ticker": "NVDA", "date": "2026-09-23", "horizon": "long_12m", "analysts": "market,news", "save": True, "show": False}
 
 
 @pytest.mark.unit
@@ -54,13 +54,14 @@ def test_flags_skip_exactly_their_own_steps(monkeypatch):
     def no_prompt(*a, **k):
         raise AssertionError("prompted although a flag answered the step")
 
-    for step in ("get_ticker", "get_analysis_date", "select_analysts"):
+    for step in ("get_ticker", "get_analysis_date", "get_analysis_horizon", "select_analysts"):
         monkeypatch.setattr(selections, step, no_prompt)
     monkeypatch.setattr(selections.updates, "enabled", lambda: False)
 
     chosen = selections._prompt_selections({}, FLAGS)
 
     assert chosen["ticker"] == "NVDA" and chosen["analysis_date"] == "2026-09-23"
+    assert chosen["analysis_horizon"] == "long_12m"
     assert chosen["analysts"] == [AnalystType.MARKET, AnalystType.NEWS]
 
 
@@ -74,7 +75,7 @@ def test_without_a_terminal_every_unanswered_question_is_named_before_the_run(mo
         run.run_analysis(flags={"ticker": "NVDA"})
 
     out = capsys.readouterr().out
-    for needed in ("--date", "--analysts", "--save", "--show", "TRADINGAGENTS_LLM_PROVIDER"):
+    for needed in ("--date", "--horizon", "--analysts", "--save", "--show", "TRADINGAGENTS_LLM_PROVIDER"):
         assert needed in out
     assert "--ticker" not in out
 
@@ -138,7 +139,7 @@ def test_the_command_passes_its_flags_to_the_run(monkeypatch):
     monkeypatch.setattr(cli_main, "run_analysis", lambda **kw: seen.update(kw))
 
     result = CliRunner().invoke(cli_main.app, ["--ticker", "NVDA", "--date", "2026-09-23",
-                                               "--analysts", "market,news", "--save", "--no-show"])
+                                               "--horizon", "long_12m", "--analysts", "market,news", "--save", "--no-show"])
 
     assert result.exit_code == 0, result.output
     assert seen["flags"] == {**FLAGS, "html": None}
@@ -167,7 +168,7 @@ def test_rounds_from_the_environment_do_not_claim_a_depth_was_chosen(monkeypatch
     """With both round counts set, the depth question never appeared."""
     monkeypatch.setenv("TRADINGAGENTS_MAX_DEBATE_ROUNDS", "1")
     monkeypatch.setenv("TRADINGAGENTS_MAX_RISK_ROUNDS", "1")
-    selections = {"research_depth": 3, "quick_think_llm": "q", "deep_think_llm": "d", "backend_url": None,
+    selections = {"analysis_horizon": "short_1m", "research_depth": 3, "quick_think_llm": "q", "deep_think_llm": "d", "backend_url": None,
                   "llm_provider": "openai", "google_thinking_level": None, "openai_reasoning_effort": None,
                   "anthropic_effort": None, "output_language": "English"}
 

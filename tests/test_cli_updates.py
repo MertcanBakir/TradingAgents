@@ -65,7 +65,7 @@ def test_an_unattended_run_contacts_no_server(monkeypatch):
     monkeypatch.setattr(updates.threading, "Thread", lambda *a, **k: started.append(1))
     with mock.patch.dict(os.environ, ENV, clear=False), \
          mock.patch.object(cli_selections, "ensure_api_key"):
-        cli_selections.get_user_selections({"ticker": "AAPL", "date": "2026-09-01", "analysts": "market"})
+        cli_selections.get_user_selections({"ticker": "AAPL", "date": "2026-09-01", "horizon": "short_1m", "analysts": "market"})
     assert calls == [] and started == []
 
 

@@ -25,6 +25,7 @@ dependencies = [
     "questionary>=2.1.0",
     "requests>=2.32.4",
     "rich>=14.0.0",
+    "scipy>=1.16.3,<2",
     "typer>=0.21.0",
     "stockstats>=0.6.5",
     "typing-extensions>=4.14.0",

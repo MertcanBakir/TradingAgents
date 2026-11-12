@@ -1,5 +1,6 @@
 import logging
 import os
+from collections.abc import Mapping
 
 import pandas as pd
 import yfinance as yf
@@ -8,6 +9,13 @@ from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.files import replace_file
 from tradingagents.dataflows.symbols import normalize_symbol, safe_ticker_component
+from tradingagents.dataflows.vendors.yahoo.candles import (
+    PROVENANCE_COLUMN,
+    attach_daily_provenance,
+    cache_needs_closing_refresh,
+    record_daily_provenance,
+    restore_daily_provenance,
+)
 from tradingagents.dataflows.vendors.yahoo.common import raise_for_empty, yf_retry
 
 logger = logging.getLogger(__name__)
@@ -158,17 +166,25 @@ def _cache_is_fresh(data_file, as_of_dt, now) -> bool:
     return as_of_dt.date() < now.date() or (now - written).total_seconds() <= OHLCV_CACHE_TTL_SECONDS
 
 
-def load_ohlcv(symbol: str, as_of_date: str, fill_gaps: bool = True) -> pd.DataFrame:
+def load_ohlcv(
+    symbol: str, as_of_date: str, fill_gaps: bool = True, *,
+    history_rows: int | None = None, interval: str = "1d",
+) -> pd.DataFrame:
     """Fetch OHLCV data with caching, filtered to prevent look-ahead bias.
 
     Downloads 5 years of data up to today and caches per symbol. On
     subsequent calls the cache is reused. Rows after as_of_date are
     filtered out so backtests never see future prices.
 
+    With ``history_rows``, use the requested number of daily bars through
+    as_of_date and fetch a separately cached date range when necessary.
+
     ``fill_gaps`` carries prices forward over gaps so indicators compute on a
     continuous series. Pass ``False`` to read the values as the vendor reported
     them, leaving a cell that was never reported empty.
     """
+    if history_rows is not None and (history_rows < 1 or interval != "1d"):
+        raise ValueError("A history window requires a positive row count and the daily interval.")
     # Resolve broker/forex symbols (XAUUSD+ -> GC=F) to Yahoo's convention,
     # then reject values that would escape the cache directory when
     # interpolated into the cache filename (e.g. ``../../tmp/x``).
@@ -206,24 +222,67 @@ def load_ohlcv(symbol: str, as_of_date: str, fill_gaps: bool = True) -> pd.DataF
         ):
             data = cached
 
+    if history_rows is not None:
+        now_with_zone = pd.Timestamp(now.to_pydatetime().astimezone())
+        if data is not None:
+            cached_rows = _clean_dataframe(data)
+            usable = cached_rows.loc[cached_rows["Date"] <= as_of_dt, "Close"].count()
+            if (
+                usable < history_rows or PROVENANCE_COLUMN not in data
+                or cache_needs_closing_refresh(data, as_of_dt.date(), now_with_zone)
+            ):
+                data = None
+        if data is None:
+            # Allow for weekends, holidays and exchange closures. Trim to actual
+            # trading bars after the download instead of treating calendar days as bars.
+            start_str = (as_of_dt - pd.Timedelta(days=2 * history_rows + 30)).strftime("%Y-%m-%d")
+            end_str = (as_of_dt + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+            data_file = os.path.join(
+                config["data_cache_dir"], f"{safe_symbol}-YFin-{interval}-{start_str}-{end_str}.csv"
+            )
+            if os.path.exists(data_file) and _cache_is_fresh(data_file, as_of_dt, now):
+                cached = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
+                if (
+                    not cached.empty and "Close" in cached.columns
+                    and not cache_needs_closing_refresh(cached, as_of_dt.date(), now_with_zone)
+                ):
+                    data = cached
+
     if data is None:
         # yf.download catches every error, a rate limit included, and returns
         # an empty frame. Ticker.history raises the rate limit, so it is retried.
-        downloaded = yf_retry(lambda: yf.Ticker(canonical).history(
-            start=start_str,
-            end=end_str,
-            auto_adjust=True,
-            actions=False,
-        ))
+        interval_args = {"interval": interval} if history_rows is not None else {}
+
+        def download():
+            ticker = yf.Ticker(canonical)
+            rows = ticker.history(
+                start=start_str, end=end_str, auto_adjust=True, actions=False, **interval_args,
+            )
+            observed_at = pd.Timestamp.now(tz="UTC")
+            if history_rows is None or rows is None or rows.empty:
+                return rows, None
+            try:
+                metadata = ticker.get_history_metadata()
+            except Exception as exc:
+                logger.debug("Yahoo session metadata unavailable for %s: %s", canonical, type(exc).__name__)
+                metadata = {}
+            metadata = metadata if isinstance(metadata, Mapping) else {}
+            return rows, record_daily_provenance(rows, observed_at, metadata)
+
+        result = yf_retry(download)
+        downloaded, provenance = result if result is not None else (None, None)
         if downloaded is None:
             raise_for_empty(symbol, canonical, "price rows")
         downloaded = _ensure_date_column(downloaded.reset_index())
         # Only cache real data — never persist an empty frame.
         if downloaded.empty or "Close" not in downloaded.columns:
             raise_for_empty(symbol, canonical, "price rows")
+        if provenance:
+            attach_daily_provenance(downloaded, provenance)
         replace_file(data_file, lambda temp: downloaded.to_csv(temp, index=False, encoding="utf-8"))
         data = downloaded
 
+    restore_daily_provenance(data)
     data = _clean_dataframe(data)
 
     # Filter to as_of_date to prevent look-ahead bias in backtesting.
@@ -254,6 +313,8 @@ def load_ohlcv(symbol: str, as_of_date: str, fill_gaps: bool = True) -> pd.DataF
     # feeding year-old prices into indicators (#1021).
     _assert_ohlcv_not_stale(data, as_of_date, symbol, canonical)
 
+    if history_rows is not None:
+        data = data.sort_values("Date").tail(history_rows)
     return data
 
 

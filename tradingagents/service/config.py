@@ -46,6 +46,7 @@ def build_graph_config(request: AnalysisRequest, settings: ServiceSettings, work
         memory_log_path=None,
         results_dir=str(workdir / "results"),
         data_cache_dir=str(workdir / "cache"),
+        analysis_horizon=request.analysis_horizon,
         output_language={"tr": "Turkish", "en": "English"}[request.language],
     )
     return config

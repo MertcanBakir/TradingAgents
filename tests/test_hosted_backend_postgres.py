@@ -38,7 +38,7 @@ def test_personal_chatgpt_real_reservation_has_no_connection_or_secret(db, tmp_p
     repo = Repository(personal_settings(tmp_path, database_url=db.dsn, personal_user_id=db.a))
     repo.replace_provider_models("chatgpt", [("GPT 5.6 Sol", "gpt-5.6-sol")])
     payload = StartAnalysis(
-        request={"ticker": "NVDA", "analysis_date": "2026-01-01"},
+        request={"ticker": "NVDA", "analysis_date": "2026-01-01", "analysis_horizon": "medium_3m"},
         auth_type="personal_chatgpt",
         quick_model="gpt-5.6-sol",
         deep_model="gpt-5.6-sol",
@@ -66,7 +66,7 @@ def test_personal_real_parallel_admission_never_exceeds_one(db, tmp_path):
     repo = Repository(personal_settings(tmp_path, database_url=db.dsn, personal_user_id=db.a))
     repo.replace_provider_models("chatgpt", [("GPT 5.6 Sol", "gpt-5.6-sol")])
     payload = StartAnalysis(
-        request={"ticker": "NVDA", "analysis_date": "2026-01-01"},
+        request={"ticker": "NVDA", "analysis_date": "2026-01-01", "analysis_horizon": "medium_3m"},
         auth_type="personal_chatgpt",
         quick_model="gpt-5.6-sol",
         deep_model="gpt-5.6-sol",
@@ -95,7 +95,7 @@ def test_personal_uid_change_never_migrates_old_records_or_claims_them(db, tmp_p
         db.a,
         uuid4(),
         StartAnalysis(
-            request={"ticker": "NVDA", "analysis_date": "2026-01-01"},
+            request={"ticker": "NVDA", "analysis_date": "2026-01-01", "analysis_horizon": "medium_3m"},
             auth_type="personal_chatgpt",
             quick_model="gpt-5.6-sol",
             deep_model="gpt-5.6-sol",
@@ -175,7 +175,7 @@ class Fixture:
         quick = changes.pop("quick_model", "gpt-5.6-sol")
         deep = changes.pop("deep_model", "gpt-5.6-sol")
         return StartAnalysis(**{
-            "request": {"ticker": "NVDA", "analysis_date": "2026-01-01"},
+            "request": {"ticker": "NVDA", "analysis_date": "2026-01-01", "analysis_horizon": "medium_3m"},
             "models": {"quick": {"connection_id": connection, "model": quick},
                        "deep": {"connection_id": connection, "model": deep}},
             **changes,
@@ -287,7 +287,7 @@ def test_real_parallel_idempotency_and_payload_conflict(db):
     assert len({row["id"] for row, created in results}) == 1
     with pytest.raises(AnalysisServiceError, match="IDEMPOTENCY_CONFLICT"):
         db.repo.reserve(
-            db.a, key, db.request(request={"ticker": "MSFT", "analysis_date": "2026-01-01"})
+            db.a, key, db.request(request={"ticker": "MSFT", "analysis_date": "2026-01-01", "analysis_horizon": "medium_3m"})
         )
 
 

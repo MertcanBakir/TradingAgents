@@ -11,7 +11,7 @@ from tradingagents.dataflows.vendors.yahoo.fundamentals import get_company_profi
 logger = logging.getLogger(__name__)
 
 
-def get_language_instruction() -> str:
+def get_language_instruction(*, preserve_decision_labels: bool = True) -> str:
     """Return a prompt instruction for the configured output language.
 
     Returns empty string when English (default), so no extra tokens are used.
@@ -24,6 +24,8 @@ def get_language_instruction() -> str:
     lang = get_config().get("output_language", "English")
     if lang.strip().lower() == "english":
         return ""
+    if not preserve_decision_labels:
+        return f" Write your entire response in {lang}."
     # The labelled lines are read by the program, so they keep their English
     # label and value: a translated rating line leaves the reader prose to
     # search, where a negated rating ("not a Sell") reads as the call (#1435).

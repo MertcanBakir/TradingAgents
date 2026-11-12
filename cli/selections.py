@@ -25,6 +25,7 @@ from cli.prompts import (
     detect_asset_type,
     ensure_api_key,
     ensure_signed_in,
+    get_analysis_horizon,
     get_ticker,
     parse_analysis_date,
     parse_analysts,
@@ -38,6 +39,7 @@ from cli.prompts import (
     select_shallow_thinking_agent,
 )
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.horizons import HORIZON_LABELS, parse_analysis_horizon
 from tradingagents.llm_clients.factory import REASONING_EFFORT_PROVIDERS
 from tradingagents.llm_clients.openai_client import check_endpoint
 
@@ -58,7 +60,7 @@ def depth_from_env() -> bool:
 def unattended_gaps(flags) -> list[str]:
     """The flags and environment variables a run with no terminal still needs."""
     env = os.environ.get
-    gaps = [f"--{name}" for name in ("ticker", "date", "analysts") if flags.get(name) is None]
+    gaps = [f"--{name}" for name in ("ticker", "date", "horizon", "analysts") if flags.get(name) is None]
     gaps += [f"--{name} or --no-{name}" for name in ("save", "show") if flags.get(name) is None]
     if not env("TRADINGAGENTS_OUTPUT_LANGUAGE"):
         gaps.append("TRADINGAGENTS_OUTPUT_LANGUAGE")
@@ -199,7 +201,14 @@ def _prompt_selections(prefs, flags):
         )
         analysis_date = get_analysis_date()
 
-    # Step 3: Output language (skipped when set via TRADINGAGENTS_OUTPUT_LANGUAGE)
+    if flags.get("horizon") is not None:
+        analysis_horizon = _from_flag(parse_analysis_horizon, flags["horizon"])
+    else:
+        console.print(create_question_box("Step 3: Analysis Horizon", "Choose the horizon for this analysis"))
+        analysis_horizon = get_analysis_horizon()
+    console.print(f"[green]✓ Analysis horizon:[/green] {HORIZON_LABELS[analysis_horizon]['en']}")
+
+    # Step 4: Output language (skipped when set via TRADINGAGENTS_OUTPUT_LANGUAGE)
     if os.environ.get("TRADINGAGENTS_OUTPUT_LANGUAGE"):
         output_language = DEFAULT_CONFIG["output_language"]
         console.print(
@@ -208,20 +217,20 @@ def _prompt_selections(prefs, flags):
     else:
         console.print(
             create_question_box(
-                "Step 3: Output Language",
+                "Step 4: Output Language",
                 "Select the language for analyst reports and final decision"
             )
         )
         output_language = ask_output_language(prefs.get("output_language"))
 
-    # Step 4: Select analysts
+    # Step 5: Select analysts
     prefs = sanitize(prefs, asset_type.value)
     if flags.get("analysts") is not None:
         selected_analysts = _from_flag(parse_analysts, flags["analysts"], asset_type)
     else:
         console.print(
             create_question_box(
-                "Step 4: Analysts Team", "Select your LLM analyst agents for the analysis"
+                "Step 5: Analysts Team", "Select your LLM analyst agents for the analysis"
             )
         )
         selected_analysts = select_analysts(asset_type, prefs.get("analysts"))
@@ -229,7 +238,7 @@ def _prompt_selections(prefs, flags):
         f"[green]Selected analysts:[/green] {', '.join(analyst.value for analyst in selected_analysts)}"
     )
 
-    # Step 5: Research depth (skipped when both round counts are set via env).
+    # Step 6: Research depth (skipped when both round counts are set via env).
     # Research depth maps to the debate + risk round counts; when both are
     # supplied through TRADINGAGENTS_MAX_DEBATE_ROUNDS / _MAX_RISK_ROUNDS we keep
     # the run non-interactive and honor the env values (#977).
@@ -243,12 +252,12 @@ def _prompt_selections(prefs, flags):
     else:
         console.print(
             create_question_box(
-                "Step 5: Research Depth", "Select your research depth level"
+                "Step 6: Research Depth", "Select your research depth level"
             )
         )
         selected_research_depth = select_research_depth(prefs.get("research_depth"))
 
-    # Step 6: LLM Provider (skipped when set via TRADINGAGENTS_LLM_PROVIDER).
+    # Step 7: LLM Provider (skipped when set via TRADINGAGENTS_LLM_PROVIDER).
     # The backend URL comes from TRADINGAGENTS_LLM_BACKEND_URL when set,
     # otherwise the provider's default endpoint — the same value the menu
     # would have picked.
@@ -263,7 +272,7 @@ def _prompt_selections(prefs, flags):
     else:
         console.print(
             create_question_box(
-                "Step 6: LLM Provider", "Select your LLM provider"
+                "Step 7: LLM Provider", "Select your LLM provider"
             )
         )
         selected_llm_provider, backend_url = select_llm_provider(prefs.get("llm_provider"))
@@ -299,7 +308,7 @@ def _prompt_selections(prefs, flags):
 
     _check_tier_providers(selected_llm_provider, backend_url)
 
-    # Step 7: Thinking agents (skipped when either model is set via environment)
+    # Step 8: Thinking agents (skipped when either model is set via environment)
     if os.environ.get("TRADINGAGENTS_QUICK_THINK_LLM") or os.environ.get("TRADINGAGENTS_DEEP_THINK_LLM"):
         selected_shallow_thinker = DEFAULT_CONFIG["quick_think_llm"]
         selected_deep_thinker = DEFAULT_CONFIG["deep_think_llm"]
@@ -310,7 +319,7 @@ def _prompt_selections(prefs, flags):
     else:
         console.print(
             create_question_box(
-                "Step 7: Thinking Agents", "Select your thinking agents for analysis"
+                "Step 8: Thinking Agents", "Select your thinking agents for analysis"
             )
         )
         remembered = prefs if prefs.get("llm_provider") == selected_llm_provider else {}
@@ -321,7 +330,7 @@ def _prompt_selections(prefs, flags):
             selected_llm_provider, remembered.get("deep_think_llm")
         )
 
-    # Step 8: Provider-specific reasoning/thinking configuration. Each knob is
+    # Step 9: Provider-specific reasoning/thinking configuration. Each knob is
     # settable via its TRADINGAGENTS_* env var; when that var is set (or the
     # provider itself came from env) the prompt is skipped and the configured
     # value is used — same env-precedence rule as the steps above. None = each
@@ -338,19 +347,19 @@ def _prompt_selections(prefs, flags):
     elif provider_lower == "google":
         thinking_level = thinking_value_or_prompt(
             "TRADINGAGENTS_GOOGLE_THINKING_LEVEL", "google_thinking_level",
-            "Gemini thinking mode", "Step 8: Thinking Mode",
+            "Gemini thinking mode", "Step 9: Thinking Mode",
             "Configure Gemini thinking mode", ask_gemini_thinking_config,
         )
     elif provider_lower in REASONING_EFFORT_PROVIDERS:
         reasoning_effort = thinking_value_or_prompt(
             "TRADINGAGENTS_OPENAI_REASONING_EFFORT", "openai_reasoning_effort",
-            "Reasoning effort", "Step 8: Reasoning Effort",
+            "Reasoning effort", "Step 9: Reasoning Effort",
             "Configure OpenAI reasoning effort level", ask_openai_reasoning_effort,
         )
     elif provider_lower == "anthropic":
         anthropic_effort = thinking_value_or_prompt(
             "TRADINGAGENTS_ANTHROPIC_EFFORT", "anthropic_effort",
-            "Claude effort", "Step 8: Effort Level",
+            "Claude effort", "Step 9: Effort Level",
             "Configure Claude effort level", ask_anthropic_effort,
         )
 
@@ -358,6 +367,7 @@ def _prompt_selections(prefs, flags):
         "ticker": selected_ticker,
         "asset_type": asset_type.value,
         "analysis_date": analysis_date,
+        "analysis_horizon": analysis_horizon,
         "analysts": selected_analysts,
         "research_depth": selected_research_depth,
         "llm_provider": selected_llm_provider.lower(),

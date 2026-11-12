@@ -125,7 +125,7 @@ def _bare_graph(tmp_path):
     from tradingagents.memory import TradingMemoryLog
 
     graph = object.__new__(TradingAgentsGraph)
-    graph.config = {"memory_log_path": str(tmp_path / "m.md"), "max_debate_rounds": 1,
+    graph.config = {"analysis_horizon": "medium_3m", "memory_log_path": str(tmp_path / "m.md"), "max_debate_rounds": 1,
                     "max_risk_discuss_rounds": 1}
     graph.memory_log = TradingMemoryLog(graph.config)
     graph.propagator = Propagator()
@@ -179,6 +179,7 @@ def test_decision_agents_see_the_portfolio(module, factory, monkeypatch):
 
     state = {
         "company_of_interest": "AAPL", "trade_date": "2026-08-14", "asset_type": "stock",
+        "analysis_horizon": "medium_3m",
         "instrument_context": "", "market_report": "M", "sentiment_report": "S",
         "news_report": "N", "fundamentals_report": "F", "investment_plan": "P",
         "trader_investment_plan": "T", "past_context": "",

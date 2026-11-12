@@ -27,6 +27,7 @@ from tradingagents.agents.rating import RATING_REVIEW
 from tradingagents.dataflows.date_window import get_current_date
 from tradingagents.dataflows.symbols import safe_ticker_component
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.horizons import parse_analysis_horizon
 from tradingagents.memory import TradingMemoryLog
 
 logger = logging.getLogger(__name__)
@@ -157,7 +158,8 @@ def run_backtest(
     interrupted sweep resumes by being run again. ``progress(done, total,
     ticker, date)`` is called before each cell that runs.
     """
-    runs = Path(config["results_dir"]) / "backtest"
+    horizon = parse_analysis_horizon(config.get("analysis_horizon"))
+    runs = Path(config["results_dir"]) / "backtest" / horizon
     if run_id:
         # run_id becomes a path segment, so it is validated like a ticker: an
         # absolute or dotted value would otherwise place the run outside results_dir.

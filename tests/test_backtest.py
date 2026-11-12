@@ -73,7 +73,7 @@ def _fake_graph(monkeypatch, tmp_path):
 
 
 def _config(tmp_path):
-    return {"results_dir": str(tmp_path / "results"),
+    return {"results_dir": str(tmp_path / "results"), "analysis_horizon": "medium_3m",
             "memory_log_path": str(tmp_path / "live_trading_memory.md")}
 
 
@@ -364,3 +364,14 @@ def test_a_ticker_or_date_given_twice_runs_and_settles_once(tmp_path):
     graph = _FakeGraph.instances[-1]
     assert graph.calls == [("NVDA", "2026-01-05")]
     assert graph.settled == ["NVDA"]
+
+
+@pytest.mark.unit
+def test_backtest_refuses_missing_horizon_before_creating_a_sweep(tmp_path):
+    config = _config(tmp_path)
+    del config["analysis_horizon"]
+
+    with pytest.raises(ValueError, match="Choose an analysis horizon"):
+        run_backtest(["NVDA"], ["2026-01-05"], config)
+
+    assert not (tmp_path / "results").exists()

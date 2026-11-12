@@ -131,11 +131,12 @@ def _run_cli(monkeypatch, tmp_path, fake):
     monkeypatch.setattr(cli_run, "update_display", lambda *a, **k: None)
     monkeypatch.setattr(cli_run, "Live", _NullLive)
     monkeypatch.setattr(cli_run, "get_user_selections", lambda flags=None: {
-        "ticker": "NVDA", "analysis_date": "2026-01-10",
+        "ticker": "NVDA", "analysis_date": "2026-01-10", "analysis_horizon": "medium_3m",
         "analysts": [AnalystType.MARKET], "asset_type": "stock",
     })
     monkeypatch.setattr(cli_run, "_build_run_config", lambda selections, checkpoint: {
         "data_cache_dir": str(tmp_path / "cache"), "results_dir": str(tmp_path / "results"),
+        "analysis_horizon": "medium_3m",
     })
     monkeypatch.setattr(m.typer, "prompt", lambda *a, **k: "N")
     cli_run.run_analysis()
@@ -181,7 +182,7 @@ def test_recording_a_run_writes_its_state_log(tmp_path):
                     "output_language": "English", "data_vendors": {}, "tool_vendors": {}}
     graph.selected_analysts = ("market",)
     graph.memory_log = TradingMemoryLog({"memory_log_path": str(tmp_path / "m.md")})
-    state = {"company_of_interest": "NVDA", "trade_date": "2026-09-23", "market_report": "M",
+    state = {"company_of_interest": "NVDA", "trade_date": "2026-09-23", "analysis_horizon": "medium_3m", "market_report": "M",
              "sentiment_report": "", "news_report": "", "fundamentals_report": "",
              "investment_debate_state": {"bull_history": "", "bear_history": "", "history": "",
                                          "current_response": ""},
@@ -192,4 +193,4 @@ def test_recording_a_run_writes_its_state_log(tmp_path):
 
     graph.record_decision("NVDA", "2026-09-23", state)
 
-    assert list(tmp_path.glob("NVDA/TradingAgentsStrategy_logs/full_states_log_2026-09-23.json"))
+    assert list(tmp_path.glob("NVDA/TradingAgentsStrategy_logs/full_states_log_2026-09-23_medium_3m.json"))

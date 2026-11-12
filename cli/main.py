@@ -11,6 +11,7 @@ from cli.prompts import filter_analysts_for_asset_type, parse_analysts
 from cli.run import run_analysis
 from tradingagents.backtest import iter_grid, run_backtest, summarize
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.horizons import parse_analysis_horizon
 from tradingagents.llm_clients.openai_client import SIGNED_IN_PROVIDERS
 from tradingagents.portfolio import load_portfolio
 
@@ -55,6 +56,7 @@ def analyze(
     ),
     ticker: str = typer.Option(None, "--ticker", help="Ticker to analyze, e.g. NVDA or 0700.HK; skips the prompt"),
     date: str = typer.Option(None, "--date", help="Analysis date, YYYY-MM-DD; skips the prompt"),
+    horizon: str = typer.Option(None, "--horizon", help="Analysis horizon: short_1m, medium_3m, or long_12m"),
     analysts: str = typer.Option(
         None, "--analysts", help="Comma-separated analysts, e.g. market,news; skips the prompt"
     ),
@@ -89,7 +91,7 @@ def analyze(
             raise typer.Exit(code=1) from None
 
     try:
-        flags = {"ticker": ticker, "date": date, "analysts": analysts, "save": save, "show": show, "html": html}
+        flags = {"ticker": ticker, "date": date, "horizon": horizon, "analysts": analysts, "save": save, "show": show, "html": html}
         run_analysis(checkpoint=checkpoint, portfolio=portfolio_context, flags=flags)
     except _NO_CONSOLE_ERRORS:
         # A terminal with no console buffer cannot host the interactive prompts.
@@ -109,6 +111,7 @@ def backtest(
     tickers: str = typer.Argument(..., help="Comma-separated tickers, e.g. NVDA,AAPL"),
     start: str = typer.Option(..., "--start", help="First analysis date, YYYY-MM-DD"),
     end: str = typer.Option(..., "--end", help="Last analysis date, YYYY-MM-DD"),
+    horizon: str = typer.Option(..., "--horizon", help="Analysis horizon: short_1m, medium_3m, or long_12m"),
     every: int = typer.Option(7, "--every", help="Days between analysis dates"),
     analysts: str = typer.Option(
         None, "--analysts", help="Comma-separated analysts to run: market, sentiment, news, fundamentals; omit for all the asset type allows"
@@ -124,6 +127,7 @@ def backtest(
     """Score past decisions over a grid of tickers and dates."""
 
     try:
+        analysis_horizon = parse_analysis_horizon(horizon)
         dates = iter_grid(start, end, every)
         book = load_portfolio(portfolio) if portfolio else None
         kind = AssetType(asset_type.strip().lower())
@@ -147,13 +151,13 @@ def backtest(
               "selected_analysts": [a.value for a in chosen]}
 
     try:
-        result = run_backtest(names, dates, DEFAULT_CONFIG, **kwargs)
+        result = run_backtest(names, dates, {**DEFAULT_CONFIG, "analysis_horizon": analysis_horizon}, **kwargs)
     except Exception as exc:  # a missing key or an unknown analyst is a setup error
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from None
     console.print(summarize(result).render())
     console.print(f"\nRan {result.cells_run} cells, skipped {result.skipped}. Log: {result.log_path}")
-    console.print(f"Continue or settle this sweep: --run-id {result.run_id}")
+    console.print(f"Continue or settle this sweep: --horizon {analysis_horizon} --run-id {result.run_id}")
     for ticker, date, reason in result.failures:
         console.print(f"[yellow]failed:[/yellow] {ticker} {date}: {reason}")
     for ticker, reason in result.settlement_failures:

@@ -12,6 +12,7 @@ from rich.markup import escape
 from cli.display import console
 from cli.models import AnalystType, AssetType
 from tradingagents.dataflows.symbols import safe_ticker_component
+from tradingagents.horizons import HORIZON_LABELS, AnalysisHorizon
 from tradingagents.llm_clients.api_key_env import get_api_key_env
 from tradingagents.llm_clients.model_catalog import get_model_options
 from tradingagents.llm_clients.openai_client import OPENAI_COMPATIBLE_PROVIDERS, SIGNED_IN_PROVIDERS
@@ -191,6 +192,22 @@ def select_analysts(asset_type: AssetType = AssetType.STOCK, default=None) -> li
         exit(1)
 
     return choices
+
+
+def get_analysis_horizon() -> AnalysisHorizon:
+    """Select the required analysis horizon from the CLI menu."""
+    choice = questionary.select(
+        "Select Analysis Horizon:",
+        choices=[
+            questionary.Choice(labels["en"], value=horizon)
+            for horizon, labels in HORIZON_LABELS.items()
+        ],
+        instruction="(Use arrow keys and press Enter)",
+        style=_MENU_STYLE,
+    ).ask()
+    if choice is None:
+        raise typer.Exit(code=1)
+    return choice
 
 
 def select_research_depth(default=None) -> int:
@@ -754,6 +771,7 @@ def ask_output_language(default=None) -> str:
     """
     choices = [
         questionary.Choice("English (default)", "English"),
+        questionary.Choice("Turkish (Türkçe)", "Turkish"),
         questionary.Choice("Chinese (中文)", "Chinese"),
         questionary.Choice("Japanese (日本語)", "Japanese"),
         questionary.Choice("Korean (한국어)", "Korean"),

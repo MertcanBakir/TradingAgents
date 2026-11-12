@@ -185,7 +185,7 @@ def test_owner_only_personal_mode_has_no_api_bindings(db, tmp_path):
     repo = Repository(personal)
     repo.replace_provider_models("chatgpt", [("Session", "gpt-5.6-sol")])
     body = {
-        "request": {"ticker": "NVDA", "analysis_date": "2026-01-01"},
+        "request": {"ticker": "NVDA", "analysis_date": "2026-01-01", "analysis_horizon": "medium_3m"},
         "auth_type": "personal_chatgpt",
         "quick_model": "gpt-5.6-sol",
         "deep_model": "gpt-5.6-sol",

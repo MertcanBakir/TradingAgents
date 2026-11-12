@@ -223,7 +223,7 @@ To run without questions, for a scheduled job or a script, answer the per-run st
 ```bash
 export TRADINGAGENTS_LLM_PROVIDER=openai TRADINGAGENTS_QUICK_THINK_LLM=gpt-6-luna TRADINGAGENTS_DEEP_THINK_LLM=gpt-6-sol
 export TRADINGAGENTS_OUTPUT_LANGUAGE=English TRADINGAGENTS_MAX_DEBATE_ROUNDS=1 TRADINGAGENTS_MAX_RISK_ROUNDS=1
-tradingagents --ticker NVDA --date 2026-09-23 --analysts market,news,fundamentals --save --no-show
+tradingagents --ticker NVDA --date 2026-09-23 --horizon medium_3m --analysts market,news,fundamentals --save --no-show
 ```
 Each flag skips only its own question. Run without a terminal, a missing answer stops the run before it starts and names the flag or variable to set.
 
@@ -269,7 +269,7 @@ To use TradingAgents inside your code, you can import the `tradingagents` module
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 
-ta = TradingAgentsGraph(debug=True, config=DEFAULT_CONFIG.copy())
+ta = TradingAgentsGraph(debug=True, config={**DEFAULT_CONFIG, "analysis_horizon": "medium_3m"})
 
 # forward propagate
 state, decision = ta.propagate("NVDA", "2026-09-01")
@@ -285,7 +285,7 @@ You can also adjust the default configuration to set your own choice of LLMs, de
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 
-config = DEFAULT_CONFIG.copy()
+config = {**DEFAULT_CONFIG, "analysis_horizon": "medium_3m"}
 config["llm_provider"] = "openai"        # e.g. openai, google, anthropic, deepseek, groq, ollama; openai_compatible covers any OpenAI-compatible endpoint (vLLM, LM Studio, llama.cpp, ...)
 config["deep_think_llm"] = "gpt-6-sol"    # Model for complex reasoning
 config["quick_think_llm"] = "gpt-6-luna"   # Model for quick tasks
@@ -366,7 +366,7 @@ tradingagents --clear-checkpoints    # reset before running
 ```
 
 ```python
-config = DEFAULT_CONFIG.copy()
+config = {**DEFAULT_CONFIG, "analysis_horizon": "medium_3m"}
 config["checkpoint_enabled"] = True
 ta = TradingAgentsGraph(config=config)
 _, decision = ta.propagate("NVDA", "2026-09-01")
@@ -387,10 +387,10 @@ print(summarize(result).render())
 From the CLI:
 
 ```bash
-tradingagents backtest NVDA,AAPL --start 2026-06-01 --end 2026-08-01 --every 7
+tradingagents backtest NVDA,AAPL --start 2026-06-01 --end 2026-08-01 --horizon medium_3m --every 7
 ```
 
-Each cell is scored on realized alpha against the instrument's regional benchmark, grouped by rating. A decision is entered at the first close after its date, because a run reads news published after that day's close. Your own memory log is never written to, and re-running the same grid with `run_id=result.run_id` skips the cells that already ran, so an interrupted sweep continues where it stopped.
+Each cell is scored on realized alpha against the instrument's regional benchmark, grouped by rating. A decision is entered at the first close after its date, because a run reads news published after that day's close. Your own memory log is never written to, and re-running the same grid with `run_id=result.run_id` skips the cells that already ran, so an interrupted sweep continues where it stopped. Use the same horizon when resuming.
 
 ## Reproducibility
 
@@ -403,7 +403,7 @@ Live data moves. News, StockTwits, and Reddit return different content as time p
 To reduce variation you can lower the sampling temperature. Set `temperature` in your config (or `TRADINGAGENTS_TEMPERATURE` in `.env`); lower values make models that honor it more repeatable. The current curated models are reasoning-first and largely ignore temperature, so for tighter reproducibility name a non-reasoning model in your config, or in `TRADINGAGENTS_DEEP_THINK_LLM` and `TRADINGAGENTS_QUICK_THINK_LLM`. Any model ID your provider serves is accepted, whether or not the picker lists it.
 
 ```python
-config = DEFAULT_CONFIG.copy()
+config = {**DEFAULT_CONFIG, "analysis_horizon": "medium_3m"}
 config["llm_provider"] = "openai"
 config["temperature"] = 0.0
 # Reasoning models ignore temperature. For tighter reproducibility, name a

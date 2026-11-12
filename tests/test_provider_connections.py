@@ -22,7 +22,7 @@ from tradingagents.service.errors import AnalysisServiceError
 
 def api_body(a=None, b=None):
     return {
-        "request": {"ticker": "NVDA", "analysis_date": "2026-01-01"},
+        "request": {"ticker": "NVDA", "analysis_date": "2026-01-01", "analysis_horizon": "medium_3m"},
         "models": {
             "quick": {"connection_id": str(a or uuid4()), "model": "fast-model"},
             "deep": {"connection_id": str(b or uuid4()), "model": "deep-model"},

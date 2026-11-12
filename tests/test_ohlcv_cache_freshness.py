@@ -14,6 +14,10 @@ import pandas as pd
 import pytest
 
 from tradingagents.dataflows.vendors.yahoo import ohlcv
+from tradingagents.dataflows.vendors.yahoo.candles import (
+    attach_daily_provenance,
+    latest_daily_candle,
+)
 
 NOW = pd.Timestamp("2026-07-18 12:00")
 STALE = ohlcv.OHLCV_CACHE_TTL_SECONDS + 60
@@ -111,3 +115,57 @@ def test_one_cache_file_per_symbol_across_days(tmp_path, monkeypatch):
 
     assert len(downloads) == 3, "each new day refetches"
     assert [p.name for p in tmp_path.iterdir()] == ["AAPL-YFin-data.csv"]
+
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("request_time", "fetch_time", "refresh"),
+    [
+        ("2026-11-27T17:59:30Z", "2026-11-27T17:59:00Z", False),
+        ("2026-11-27T18:01:00Z", "2026-11-27T17:59:00Z", True),
+        ("2026-11-27T18:02:00Z", "2026-11-27T18:01:00Z", False),
+    ],
+)
+def test_horizon_cache_refreshes_on_exchange_close(tmp_path, monkeypatch, request_time, fetch_time, refresh):
+    day = "2026-11-27"
+    instant = pd.Timestamp(request_time)
+    fetched = pd.Timestamp(fetch_time)
+    wall_time = pd.Timestamp(instant.to_pydatetime().astimezone().replace(tzinfo=None))
+    session_end = pd.Timestamp("2026-11-27T18:00:00Z")
+    provenance = {
+        "observed_at": fetched.isoformat(),
+        "market_time": min(fetched, session_end).isoformat(),
+        "session_start": "2026-11-27T14:30:00Z",
+        "session_end": session_end.isoformat(),
+        "exchange_timezone": "America/New_York",
+    }
+    start = (pd.Timestamp(day) - pd.Timedelta(days=32)).strftime("%Y-%m-%d")
+    cache_path = tmp_path / f"AAPL-YFin-1d-{start}-2026-11-28.csv"
+    frame = pd.DataFrame({"Date": [day], "Close": [100.0]})
+    attach_daily_provenance(frame, provenance)
+    frame.to_csv(cache_path, index=False)
+    os.utime(cache_path, (fetched.timestamp(), fetched.timestamp()))
+    calls = []
+
+    def download(**kwargs):
+        calls.append(kwargs)
+        return pd.DataFrame({"Close": [101.0]}, index=pd.DatetimeIndex([day], name="Date"))
+
+    monkeypatch.setattr(ohlcv, "get_config", lambda: {"data_cache_dir": str(tmp_path)})
+    monkeypatch.setattr(ohlcv.pd.Timestamp, "today", staticmethod(lambda: wall_time))
+    monkeypatch.setattr(ohlcv.pd.Timestamp, "now", staticmethod(lambda tz=None: instant))
+    monkeypatch.setattr(ohlcv.yf, "Ticker", lambda symbol: SimpleNamespace(
+        history=download,
+        get_history_metadata=lambda: {
+            "regularMarketTime": session_end,
+            "currentTradingPeriod": {"regular": {"start": provenance["session_start"], "end": session_end}},
+            "exchangeTimezoneName": provenance["exchange_timezone"],
+        },
+    ))
+
+    result = ohlcv.load_ohlcv("AAPL", day, fill_gaps=False, history_rows=1)
+
+    assert len(calls) == int(refresh)
+    assert result["Close"].iloc[-1] == (101.0 if refresh else 100.0)
+    assert latest_daily_candle(result).closed == (instant >= session_end)

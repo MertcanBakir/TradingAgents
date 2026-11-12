@@ -15,6 +15,7 @@ from tradingagents.dataflows.config import run_config, run_config_context, set_c
 from tradingagents.dataflows.date_window import get_current_date, is_historical
 from tradingagents.dataflows.symbols import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.horizons import parse_analysis_horizon
 from tradingagents.llm_clients import create_tier_client, tier_provider
 from tradingagents.memory import TradingMemoryLog, settlement
 from tradingagents.memory.reflection import Reflector
@@ -73,6 +74,7 @@ class TradingAgentsGraph:
         """
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
+        parse_analysis_horizon(self.config.get("analysis_horizon"))
         self.callbacks = callbacks or []
         self.agent_stats = AgentStatsHandler()
 
@@ -313,6 +315,7 @@ class TradingAgentsGraph:
             asset_type=asset_type,
             instrument_context=self.resolve_instrument_context(company_name, asset_type, trade_date),
             portfolio_context=portfolio.render(company_name) if portfolio is not None else "",
+            analysis_horizon=parse_analysis_horizon(self.config.get("analysis_horizon")),
         )
 
     def _memory_step(self, state):
@@ -455,6 +458,7 @@ class TradingAgentsGraph:
         entry = {
             "company_of_interest": final_state["company_of_interest"],
             "trade_date": final_state["trade_date"],
+            "analysis_horizon": final_state["analysis_horizon"],
             "market_report": final_state["market_report"],
             "sentiment_report": final_state["sentiment_report"],
             "news_report": final_state["news_report"],
@@ -486,7 +490,8 @@ class TradingAgentsGraph:
         directory = Path(self.config["results_dir"]) / safe_ticker / "TradingAgentsStrategy_logs"
         directory.mkdir(parents=True, exist_ok=True)
 
-        log_path = directory / f"full_states_log_{trade_date}.json"
+        horizon = parse_analysis_horizon(final_state["analysis_horizon"])
+        log_path = directory / f"full_states_log_{trade_date}_{horizon}.json"
         with open(log_path, "w", encoding="utf-8") as f:
             # Reports can be in any language and this file is read by a person.
             json.dump(entry, f, indent=4, ensure_ascii=False)

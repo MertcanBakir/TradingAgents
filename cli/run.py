@@ -40,7 +40,8 @@ def _run_directory(config: dict, ticker: str, trade_date: str) -> Path:
     Every other path that interpolates a ticker checks it first; a value of
     ".." here would place the run outside the results directory.
     """
-    return Path(config["results_dir"]) / safe_ticker_component(ticker) / trade_date
+    directory = Path(config["results_dir"]) / safe_ticker_component(ticker) / trade_date
+    return directory / config["analysis_horizon"]
 
 
 def _announce_checkpoint_state(graph, ticker: str, trade_date: str) -> None:
@@ -89,6 +90,7 @@ def _build_run_config(selections: dict, checkpoint: bool | None) -> dict:
     for key in ("google_thinking_level", "openai_reasoning_effort", "anthropic_effort"):
         if selections.get(key) is not None:
             config[key] = selections[key]
+    config["analysis_horizon"] = selections["analysis_horizon"]
     config["output_language"] = selections.get("output_language", "English")
     # --checkpoint/--no-checkpoint overrides only when explicitly given; omitting
     # the flag preserves TRADINGAGENTS_CHECKPOINT_ENABLED / the default (#976).
@@ -347,6 +349,7 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
             final_state = {}
             for chunk in trace:
                 final_state.update(chunk)
+            final_state["analysis_horizon"] = config["analysis_horizon"]
             final_state["agent_stats"] = graph.agent_stats.snapshot()
 
             # Clean run: log the decision, then drop this run's checkpoint so a

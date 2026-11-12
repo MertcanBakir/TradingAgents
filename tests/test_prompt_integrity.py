@@ -28,7 +28,11 @@ def test_an_analyst_brief_is_text_not_a_python_object(name):
     briefs = [node.value for node in ast.walk(tree)
               if isinstance(node, ast.Assign)
               and getattr(node.targets[0], "id", "") == "system_message"]
-    assert briefs, f"{name} has no system_message"
+    if name == "market_analyst":
+        briefs = [kw.value for node in ast.walk(tree) if isinstance(node, ast.Call)
+                  and getattr(node.func, "id", "") == "SystemMessage"
+                  for kw in node.keywords if kw.arg == "content"]
+    assert briefs, f"{name} has no system message"
     for brief in briefs:
         assert not isinstance(brief, ast.Tuple), "the brief is a tuple, not text"
 
