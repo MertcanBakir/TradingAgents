@@ -79,8 +79,12 @@ def test_research_manager_prompt_states_constraint():
 
 
 @pytest.mark.unit
-def test_portfolio_manager_prompt_states_constraint():
+@pytest.mark.parametrize("use_structured", [True, False])
+def test_portfolio_manager_prompt_states_constraint(use_structured):
+    from langchain_core.messages import AIMessage
+
     from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
+    from tradingagents.dataflows.config import run_config
 
     captured = {}
     llm = _capturing_llm(
@@ -97,13 +101,24 @@ def test_portfolio_manager_prompt_states_constraint():
         "current_conservative_response": "", "current_neutral_response": "",
         "latest_speaker": "Neutral", "count": 1,
     }
-    create_portfolio_manager(llm)({
-        "company_of_interest": "NVDA",
-        "risk_debate_state": risk,
-        "investment_plan": "plan",
-        "trader_investment_plan": "trader plan",
-    })
-    assert NO_EXTERNAL_TOOLS in _prompt_text(captured["prompt"])
+    if not use_structured:
+        llm.with_structured_output.return_value.invoke.side_effect = lambda prompt: (
+            captured.__setitem__("prompt", prompt) or None
+        )
+        llm.invoke.return_value = AIMessage(content="**Rating**: Hold\n**Time Horizon**: 6 months")
+    with run_config({"output_language": "Turkish"}):
+        state = create_portfolio_manager(llm)({
+            "company_of_interest": "NVDA",
+            "analysis_horizon": "short_1m",
+            "risk_debate_state": risk,
+            "investment_plan": "plan",
+            "trader_investment_plan": "trader plan",
+        })
+    prompt = _prompt_text(captured["prompt"])
+    assert NO_EXTERNAL_TOOLS in prompt
+    assert "Short (1 month)" in prompt
+    assert state["final_trade_decision"].endswith("**Time Horizon**: Kısa (1 ay)")
+    assert "6 months" not in state["final_trade_decision"]
 
 
 @pytest.mark.unit
@@ -134,9 +149,9 @@ def test_sentiment_prompt_states_constraint(monkeypatch):
 def test_tool_using_analysts_keep_their_date_guidance():
     # The analysts that really do call tools keep the wording that anchors their
     # tool date ranges (#836) — this fix is scoped to no-tool agents.
-    import tradingagents.agents.analysts.market_analyst as market
+    import tradingagents.agents.analysts.fundamentals_analyst as fundamentals
     import tradingagents.agents.analysts.news_analyst as news
-    for module in (market, news):
+    for module in (fundamentals, news):
         assert "tool-call date ranges" in inspect.getsource(module)
 
 

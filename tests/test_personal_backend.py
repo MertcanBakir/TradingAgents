@@ -119,7 +119,7 @@ def test_personal_configuration_fails_closed(tmp_path, change):
 
 def test_start_contract_no_oauth_secret_or_foreign_owner():
     body = {
-        "request": {"ticker": "NVDA", "analysis_date": "2026-01-01"},
+        "request": {"ticker": "NVDA", "analysis_date": "2026-01-01", "analysis_horizon": "medium_3m"},
         "quick_model": "gpt-5.6-sol",
         "deep_model": "gpt-5.6-sol",
         "auth_type": "personal_chatgpt",
@@ -234,7 +234,7 @@ def test_personal_child_reuses_upstream_callable_without_any_api_key(tmp_path, m
         "user_id": OWNER,
         "auth_type": "personal_chatgpt",
         "connection_id": None,
-        "request": {"ticker": "NVDA", "analysis_date": "2026-01-01"},
+        "request": {"ticker": "NVDA", "analysis_date": "2026-01-01", "analysis_horizon": "medium_3m"},
         "model_settings": {
             k: {"provider": "chatgpt", "model": "gpt-5.6-sol"} for k in ("quick", "deep")
         },

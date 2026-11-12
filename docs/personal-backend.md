@@ -99,7 +99,7 @@ Authenticate with the owner's Supabase bearer session and a UUID Idempotency-Key
 ```json
 {
   "auth_type": "personal_chatgpt",
-  "request": {"ticker": "NVDA", "analysis_date": "2026-10-20", "language": "tr"},
+  "request": {"ticker": "NVDA", "analysis_date": "2026-10-20", "analysis_horizon": "medium_3m", "language": "tr"},
   "quick_model": "REPLACE_WITH_AVAILABLE_CHATGPT_MODEL",
   "deep_model": "REPLACE_WITH_AVAILABLE_CHATGPT_MODEL"
 }

@@ -98,6 +98,7 @@ def _answer_every_prompt(monkeypatch):
     monkeypatch.setattr(cli_selections.updates, "enabled", lambda: False)
     monkeypatch.setattr(cli_selections, "get_ticker", lambda: "NVDA")
     monkeypatch.setattr(cli_selections, "get_analysis_date", lambda: "2026-09-01")
+    monkeypatch.setattr(cli_selections, "get_analysis_horizon", lambda: "short_1m")
     monkeypatch.setattr(cli_selections, "ask_output_language", lambda default=None: "English")
     monkeypatch.setattr(cli_selections, "select_analysts", lambda asset_type, default=None: [AnalystType.MARKET])
     monkeypatch.setattr(cli_selections, "select_research_depth", lambda default=None: 3)
@@ -130,7 +131,7 @@ def test_a_custom_language_is_remembered_without_breaking_the_next_run():
     rejects a default it cannot find, so offering it back would crash startup."""
     from cli.prompts import ask_output_language
 
-    save_last_run({"output_language": "Turkish"})
+    save_last_run({"output_language": "Finnish"})
     with mock.patch("cli.prompts.questionary.select") as select:
         select.return_value.ask.return_value = "English"
         ask_output_language(load_last_run()["output_language"])
@@ -150,6 +151,7 @@ def test_a_remembered_endpoint_is_offered_back(monkeypatch):
     monkeypatch.setattr(cli_selections.updates, "enabled", lambda: False)
     monkeypatch.setattr(cli_selections, "get_ticker", lambda: "NVDA")
     monkeypatch.setattr(cli_selections, "get_analysis_date", lambda: "2026-09-01")
+    monkeypatch.setattr(cli_selections, "get_analysis_horizon", lambda: "short_1m")
     monkeypatch.setattr(cli_selections, "ask_output_language", lambda default=None: "English")
     monkeypatch.setattr(cli_selections, "select_analysts", lambda asset_type, default=None: [AnalystType.MARKET])
     monkeypatch.setattr(cli_selections, "select_research_depth", lambda default=None: 1)

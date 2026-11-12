@@ -115,6 +115,7 @@ def normalize_result(
         {
             "tradingagents_version": __version__,
             "analysis_date": request.analysis_date.isoformat(),
+            "analysis_horizon": request.analysis_horizon,
             "configuration": config.model_dump(mode="json"),
             "configured_data_sources": {
                 key: value
@@ -184,6 +185,7 @@ def normalize_result(
         analysis_id=analysis_id,
         ticker=request.ticker,
         analysis_date=request.analysis_date,
+        analysis_horizon=request.analysis_horizon,
         final_rating=rating,
         trade_action=action,
         quality=quality,

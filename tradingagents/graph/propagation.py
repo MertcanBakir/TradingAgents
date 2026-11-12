@@ -1,6 +1,7 @@
 from typing import Any
 
 from tradingagents.agents.state import InvestDebateState, RiskDebateState
+from tradingagents.horizons import parse_analysis_horizon
 
 
 class Propagator:
@@ -18,6 +19,8 @@ class Propagator:
         past_context: str = "",
         instrument_context: str = "",
         portfolio_context: str = "",
+        *,
+        analysis_horizon: str,
     ) -> dict[str, Any]:
         """Create the initial state for the agent graph.
 
@@ -33,6 +36,7 @@ class Propagator:
             "asset_type": asset_type,
             "instrument_context": instrument_context,
             "trade_date": str(trade_date),
+            "analysis_horizon": parse_analysis_horizon(analysis_horizon),
             "past_context": past_context,
             "memory_note": "",
             "portfolio_context": portfolio_context,

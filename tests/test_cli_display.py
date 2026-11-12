@@ -43,7 +43,7 @@ def test_the_other_shapes_are_unchanged(value, expected):
 
 def _state(ticker, final="评级: 买入"):
     return {
-        "company_of_interest": ticker, "trade_date": "2026-09-01",
+        "company_of_interest": ticker, "trade_date": "2026-09-01", "analysis_horizon": "medium_3m",
         "market_report": "市场", "sentiment_report": "情绪", "news_report": "新闻",
         "fundamentals_report": "基本面", "investment_plan": "计划",
         "trader_investment_plan": "交易计划", "final_trade_decision": final, "final_rating": "REVIEW",

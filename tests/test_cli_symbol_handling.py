@@ -72,7 +72,7 @@ def test_the_run_directory_cannot_escape_the_results_directory(tmp_path, monkeyp
     own results tree did not, so a ticker of '..' wrote a level up."""
 
     with pytest.raises(ValueError):
-        cli_run._run_directory({"results_dir": str(tmp_path)}, "..", "2026-09-01")
+        cli_run._run_directory({"results_dir": str(tmp_path), "analysis_horizon": "short_1m"}, "..", "2026-09-01")
 
-    ok = cli_run._run_directory({"results_dir": str(tmp_path)}, "NVDA", "2026-09-01")
+    ok = cli_run._run_directory({"results_dir": str(tmp_path), "analysis_horizon": "short_1m"}, "NVDA", "2026-09-01")
     assert str(ok).startswith(str(tmp_path))

@@ -57,6 +57,7 @@ class TestCliSkipsPromptsFromEnv(unittest.TestCase):
              mock.patch.object(cli_selections.updates, "enabled", return_value=False), \
              mock.patch.object(cli_selections, "get_ticker", return_value="AAPL"), \
              mock.patch.object(cli_selections, "get_analysis_date", return_value="2026-05-29"), \
+             mock.patch.object(cli_selections, "get_analysis_horizon", return_value="medium_3m"), \
              mock.patch.object(cli_selections, "select_analysts", return_value=[]), \
              mock.patch.object(cli_selections, "select_research_depth", return_value=1), \
              mock.patch.object(cli_selections, "ensure_api_key") as ensure_key, \
@@ -98,6 +99,7 @@ class TestResearchDepthSkippedFromEnv(unittest.TestCase):
              mock.patch.object(cli_selections.updates, "enabled", return_value=False), \
              mock.patch.object(cli_selections, "get_ticker", return_value="AAPL"), \
              mock.patch.object(cli_selections, "get_analysis_date", return_value="2026-05-29"), \
+             mock.patch.object(cli_selections, "get_analysis_horizon", return_value="medium_3m"), \
              mock.patch.object(cli_selections, "select_analysts", return_value=[]), \
              mock.patch.object(cli_selections, "select_research_depth") as prompt_depth, \
              mock.patch.object(cli_selections, "ensure_api_key"), \
@@ -126,6 +128,7 @@ class TestReasoningEffortSkippedFromEnv(unittest.TestCase):
              mock.patch.object(cli_selections.updates, "enabled", return_value=False), \
              mock.patch.object(cli_selections, "get_ticker", return_value="AAPL"), \
              mock.patch.object(cli_selections, "get_analysis_date", return_value="2026-05-29"), \
+             mock.patch.object(cli_selections, "get_analysis_horizon", return_value="medium_3m"), \
              mock.patch.object(cli_selections, "select_analysts", return_value=[]), \
              mock.patch.object(cli_selections, "select_research_depth", return_value=1), \
              mock.patch.object(cli_selections, "ensure_api_key"), \

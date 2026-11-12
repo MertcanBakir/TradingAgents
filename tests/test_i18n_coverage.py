@@ -62,7 +62,7 @@ def test_report_agent_applies_language_instruction(rel):
     path = _AGENTS_DIR / rel
     assert path.exists(), f"missing agent module: {rel}"
     src = path.read_text(encoding="utf-8")
-    assert "get_language_instruction()" in src, (
+    assert "get_language_instruction(" in src, (
         f"{rel} does not apply get_language_instruction(); its output would "
         f"ignore the configured output_language (#740/#801)."
     )

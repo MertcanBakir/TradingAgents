@@ -533,7 +533,7 @@ def test_a_field_the_model_did_not_give_says_so():
     from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating, render_pm_decision
 
     rendered = render_pm_decision(PortfolioDecision(
-        rating=PortfolioRating.HOLD, executive_summary="s", investment_thesis="t"))
+        rating=PortfolioRating.HOLD, executive_summary="s", investment_thesis="t"), horizon_label="Short (1 month)")
     assert "Price Target" in rendered and "not provided" in rendered.lower()
 
 

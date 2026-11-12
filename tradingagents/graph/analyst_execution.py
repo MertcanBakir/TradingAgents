@@ -1,7 +1,7 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from tradingagents.agents.analysts import fundamentals_analyst, market_analyst, news_analyst
+from tradingagents.agents.analysts import fundamentals_analyst, news_analyst
 
 
 @dataclass(frozen=True)
@@ -22,7 +22,6 @@ ANALYST_NODE_SPECS: dict[str, AnalystNodeSpec] = {
         key="market",
         agent_node="Market Analyst",
         report_key="market_report",
-        tools=market_analyst.TOOLS,
     ),
     "social": AnalystNodeSpec(
         # Saved configs select this analyst as "social". It fetches its

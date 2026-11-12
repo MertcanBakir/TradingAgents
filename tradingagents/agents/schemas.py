@@ -254,18 +254,13 @@ class PortfolioDecision(BaseModel):
         default=None,
         description="Optional target price in the instrument's quote currency.",
     )
-    time_horizon: str | None = Field(
-        default=None,
-        description="Optional recommended holding period, e.g. '3-6 months'.",
-    )
-
     @field_validator("price_target", mode="before")
     @classmethod
     def _nullish_float_to_none(cls, v):
         return _coerce_optional_float(v)
 
 
-def render_pm_decision(decision: PortfolioDecision) -> str:
+def render_pm_decision(decision: PortfolioDecision, *, horizon_label: str) -> str:
     """Render a PortfolioDecision back to the markdown shape the rest of the system expects.
 
     Memory log, CLI display, and saved report files all read this markdown,
@@ -284,7 +279,7 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
     # so a reader cannot tell "no target" from "target not reported".
     target = decision.price_target if decision.price_target is not None else "not provided"
     parts.extend(["", f"**Price Target**: {target}"])
-    parts.extend(["", f"**Time Horizon**: {decision.time_horizon or 'not provided'}"])
+    parts.extend(["", f"**Time Horizon**: {horizon_label}"])
     return "\n".join(parts)
 
 

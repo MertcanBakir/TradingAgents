@@ -86,6 +86,8 @@ class ScriptedModel(BaseChatModel):
                                if k in t.tool_call_schema.model_json_schema()["properties"]}}
                      for i, t in enumerate(self.tools)]
             message = AIMessage(content="", tool_calls=calls)
+        elif "Return only a JSON object" in str(messages[0].content):
+            message = AIMessage(content='{"groups": ["rsi", "invalid-code"]}')
         else:
             message = AIMessage(content=TEXT)
         return ChatResult(generations=[ChatGeneration(message=message)])
@@ -122,6 +124,7 @@ def offline(monkeypatch, tmp_path):
 
 def _graph(tmp_path, monkeypatch, model, debug=False, **config):
     cfg = copy.deepcopy(DEFAULT_CONFIG)
+    cfg.setdefault("analysis_horizon", "medium_3m")
     cfg.update(results_dir=str(tmp_path / "results"), data_cache_dir=str(tmp_path / "cache"),
                memory_log_path=str(tmp_path / "log.md"), **config)
     monkeypatch.setattr(trading_graph, "create_tier_client", lambda config, tier, **k: _Client(model))
@@ -169,10 +172,12 @@ def test_headless_service_real_graph_injects_user_memory_without_cli_side_effect
     settings = ServiceSettings(quick=LLMChoice(provider="chatgpt", model="gpt-5.6-sol"),
                                deep=LLMChoice(provider="chatgpt", model="gpt-5.6-sol"))
     result = AnalysisEngine(settings=settings, memory=memory).run(
-        AnalysisRequest(ticker="NVDA", analysis_date=TRADE_DATE), user_id=user)
+        AnalysisRequest(ticker="NVDA", analysis_date=TRADE_DATE, analysis_horizon="long_12m"), user_id=user)
     assert result.quality == "complete" and result.memory_saved
     assert result.final_rating == "Overweight" and result.trade_action == "Buy"
     decision = next(s.content_markdown for s in result.sections if s.code == "final_assessment")
+    assert result.analysis_horizon == "long_12m"
+    assert "**Time Horizon**: Uzun (12 ay)" in decision
     assert "Agent Çalışma İstatistikleri" in decision
     assert "Market Analyst" in decision
     assert any("HEADLESS_MEMORY_LESSON" in prompt for prompt in captured)
@@ -191,7 +196,7 @@ def test_a_full_run_reaches_a_logged_decision(tmp_path, monkeypatch, offline, st
     for key in ("market_report", "sentiment_report", "news_report", "fundamentals_report",
                 "investment_plan", "trader_investment_plan", "final_trade_decision"):
         assert state[key].strip(), key
-    tool_methods = {"get_stock_data", "get_indicators", "get_news", "get_global_news",
+    tool_methods = {"get_news", "get_global_news",
                     "get_macro_indicators", "get_prediction_markets", "get_fundamentals",
                     "get_balance_sheet", "get_cashflow", "get_income_statement",
                     "get_insider_transactions", "ohlcv"}
@@ -251,7 +256,7 @@ def test_a_debug_run_prints_the_analysts_work_and_reaches_the_same_decision(tmp_
     assert signal == "Overweight"
     assert state["market_report"].strip() and state["fundamentals_report"].strip()
     printed = capsys.readouterr().out
-    assert "get_stock_data" in printed and "get_balance_sheet" in printed
+    assert "get_news" in printed and "get_balance_sheet" in printed
 
 
 @pytest.mark.unit
@@ -277,8 +282,9 @@ def test_a_streamed_run_reads_its_own_graph_config(tmp_path, monkeypatch, offlin
     graph = _graph(tmp_path, monkeypatch, ScriptedModel(), output_language="French")
     set_config({"output_language": "German"})
     seen = []
-    monkeypatch.setitem(router.VENDOR_METHODS["get_stock_data"], "yfinance",
-                        lambda *a, **k: seen.append(get_config()["output_language"]) or "prices")
+    load = snapshot.load_ohlcv
+    monkeypatch.setattr(snapshot, "load_ohlcv",
+                        lambda *a, **k: seen.append(get_config()["output_language"]) or load(*a, **k))
 
     between = [get_config()["output_language"]
                for _ in graph.stream_run(graph.create_run_state("NVDA", TRADE_DATE), **graph.propagator.get_graph_args())]
@@ -315,9 +321,15 @@ def test_an_analyst_that_keeps_calling_tools_writes_its_report_at_the_limit(tmp_
 
     final_state, rating = graph.propagate("NVDA", TRADE_DATE)
 
-    # Each of the three tool-using analysts must obey the active limit.
-    assert len(model.tool_turns) == 3 * graph.config["max_tool_rounds"]
-    for key in ("market_report", "news_report", "fundamentals_report"):
+    # Each of the two tool-using analysts must obey the active limit.
+    assert len(model.tool_turns) == 2 * graph.config["max_tool_rounds"]
+    assert "\n\nReport.\n\n### SciPy support and resistance zones" in final_state["market_report"]
+    assert "**Rating**:" not in final_state["market_report"]
+    assert "FINAL TRANSACTION PROPOSAL" not in final_state["market_report"]
+    assert any(
+        label in final_state["market_report"] for label in ("**Candle status:**", "**Mum durumu:**")
+    )
+    for key in ("news_report", "fundamentals_report"):
         assert final_state[key] == TEXT
     assert rating == "Overweight"
 
@@ -332,7 +344,7 @@ def test_the_last_turn_is_offered_no_tools_and_reads_its_tool_results_as_text(tm
     graph.propagate("NVDA", TRADE_DATE)
 
     wrap_ups = [h for h in model.last_turns if isinstance(h[-1], HumanMessage) and "tool round" in h[-1].content]
-    assert len(wrap_ups) == 3
+    assert len(wrap_ups) == 2
     for history in wrap_ups:
         assert not any(isinstance(m, ToolMessage) or getattr(m, "tool_calls", None) for m in history)
         assert any("returned]" in str(m.content) for m in history)
@@ -516,7 +528,8 @@ def test_agent_stats_cover_parallel_nodes_tools_and_reset(tmp_path, monkeypatch,
     market = rows["Market Analyst"]
     assert market["llm_calls"] == 2
     assert market["usage_missing"] == 2
-    assert market["tools"] == {"get_stock_data": 1, "get_indicators": 1, "get_verified_market_snapshot": 1}
+    assert market["tools"] == {}
+    assert market["data_accesses"] == {"market_price_history": 1}
     assert rows["Sentiment Analyst"]["tools"] == {}
     assert rows["Sentiment Analyst"]["data_accesses"].get("get_news") == 1
     assert rows["Bull Researcher"]["llm_calls"] == 1
@@ -533,3 +546,12 @@ def test_agent_stats_accumulate_real_debate_rounds(tmp_path, monkeypatch, offlin
     for agent in ("Bull Researcher", "Bear Researcher", "Aggressive Analyst", "Conservative Analyst", "Neutral Analyst"):
         assert rows[agent]["llm_calls"] == 2
         assert len(rows[agent]["runs"]) == 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("settings", [{}, {"analysis_horizon": "invalid"}])
+def test_graph_rejects_missing_or_invalid_horizon_before_constructing_clients(monkeypatch, settings):
+    monkeypatch.setattr(trading_graph, "create_tier_client", lambda *a, **k: pytest.fail("Client constructed"))
+    config = {**DEFAULT_CONFIG, **settings}
+    with pytest.raises(ValueError, match="Choose an analysis horizon"):
+        trading_graph.TradingAgentsGraph(config=config)

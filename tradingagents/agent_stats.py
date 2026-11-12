@@ -269,23 +269,23 @@ def track_data(name):
 def render_agent_stats(rows, language="en"):
     tr = language == "tr"
     headers = (
-        "Agent | Süre | Model çağrısı | Giriş tokenı | Çıkış tokenı | Tool çağrısı | Durum"
+        "Agent | Süre | Model çağrısı | Giriş tokenı | Çıkış tokenı | Model araç çağrısı | Veri erişimi | Durum"
         if tr
-        else "Agent | Duration | Model calls | Input tokens | Output tokens | Tool calls | Status"
+        else "Agent | Duration | Model calls | Input tokens | Output tokens | Model tool calls | Data accesses | Status"
     )
-    lines = ["| " + headers + " |", "|---|---:|---:|---:|---:|---:|---|"]
+    lines = ["| " + headers + " |", "|---|---:|---:|---:|---:|---:|---:|---|"]
     for row in rows:
         missing = row["usage_missing"]
         suffix = " + ?" if missing else ""
         lines.append(
-            f"| {row['agent']} | {row['duration_seconds']:.2f}s | {row['llm_calls']} | {row['tokens_in']:,}{suffix} | {row['tokens_out']:,}{suffix} | {sum(row['tools'].values())} | {row['status']} |"
+            f"| {row['agent']} | {row['duration_seconds']:.2f}s | {row['llm_calls']} | {row['tokens_in']:,}{suffix} | {row['tokens_out']:,}{suffix} | {sum(row['tools'].values())} | {sum(row['data_accesses'].values())} | {row['status']} |"
         )
     if not rows:
         lines.append("\nÖlçüm bulunmuyor." if tr else "\nNo measurements available.")
     lines.append(
-        "\nSüreler paralel çalışmaları içerir; toplam analiz süresi için toplanmaz. '?' eksik token bilgisidir. Çağrılar mantıksal çağrılardır; SDK tekrarları/HTTP istekleri değildir."
+        "\nSüreler paralel çalışmaları içerir; toplam analiz süresi için toplanmaz. '?' eksik token bilgisidir. Veri erişimi, modelin araç çağrısı yapmadan Python üzerinden veri yüklemesini de sayar. Sayaçlar HTTP isteği sayısı değildir."
         if tr
-        else "\nDurations overlap during parallel work; do not sum them as analysis elapsed time. '?' means missing token usage. Counts are logical calls, not SDK retries or HTTP requests."
+        else "\nDurations overlap during parallel work; do not sum them as analysis elapsed time. '?' means missing token usage. Data accesses include loads performed directly by Python. Counts do not measure HTTP requests."
     )
     for row in rows:
         lines.append(f"\n##### {row['agent']}")

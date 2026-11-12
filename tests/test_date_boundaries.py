@@ -61,3 +61,32 @@ def test_load_ohlcv_requests_inclusive_end(monkeypatch, tmp_path):
 
     expected_end = (pd.Timestamp.today() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
     assert captured["end"] == expected_end  # tomorrow -> today's row included (#986)
+
+
+@pytest.mark.unit
+def test_historical_horizon_refetches_when_shared_cache_starts_too_late(monkeypatch, tmp_path):
+    set_config({"data_cache_dir": str(tmp_path)})
+    shared = tmp_path / "AAPL-YFin-data.csv"
+    shared.write_text("Date,Close\n2026-10-30,999\n")
+    history = pd.DataFrame(
+        {"Open": 1, "High": 2, "Low": 1, "Close": [1, 2, 3, 999], "Volume": 10},
+        index=pd.bdate_range("2018-02-01", periods=4, name="Date"),
+    )
+    requests = []
+
+    def fake_history(**kwargs):
+        requests.append(kwargs)
+        return history
+
+    monkeypatch.setattr(ohlcv.yf, "Ticker", lambda symbol: SimpleNamespace(history=fake_history))
+    kwargs = {"history_rows": 2, "interval": "1d", "fill_gaps": False}
+    result = ohlcv.load_ohlcv("AAPL", "2018-02-05", **kwargs)
+
+    assert result["Close"].tolist() == [2, 3]
+    assert requests[0]["end"] == "2018-02-06"
+    assert requests[0]["interval"] == "1d"
+    reused = ohlcv.load_ohlcv("AAPL", "2018-02-05", **kwargs)
+    assert reused["Close"].tolist() == [2, 3]
+    assert reused.attrs["yahoo_daily_provenance"] == result.attrs["yahoo_daily_provenance"]
+    assert len(requests) == 1
+    assert "999" in shared.read_text()

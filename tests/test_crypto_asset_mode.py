@@ -46,7 +46,7 @@ class CryptoAssetModeTests(unittest.TestCase):
 
     def test_propagator_includes_asset_type_in_initial_state(self):
         state = Propagator().create_initial_state(
-            "BTC-USD", "2026-04-18", asset_type=AssetType.CRYPTO.value
+            "BTC-USD", "2026-04-18", asset_type=AssetType.CRYPTO.value, analysis_horizon="short_1m"
         )
 
         self.assertEqual(state["asset_type"], AssetType.CRYPTO.value)

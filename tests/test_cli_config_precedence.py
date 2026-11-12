@@ -14,6 +14,7 @@ import cli.run as cli_run
 
 # Minimal selections dict shaped like get_user_selections()'s return value.
 SELECTIONS = {
+    "analysis_horizon": "medium_3m",
     "research_depth": 5,
     "quick_think_llm": "gpt-5.4-mini",
     "deep_think_llm": "gpt-5.5",
@@ -97,7 +98,7 @@ def test_a_half_set_round_count_says_which_value_won(capsys, monkeypatch):
     monkeypatch.setattr(m.console, "print", lambda *a, **k: printed.append(str(a[0]) if a else ""))
 
     config = cli_run._build_run_config({
-        "ticker": "NVDA", "analysis_date": "2026-09-01", "asset_type": "stock",
+        "ticker": "NVDA", "analysis_date": "2026-09-01", "analysis_horizon": "medium_3m", "asset_type": "stock",
         "analysts": [], "research_depth": 5, "llm_provider": "openai",
         "quick_think_llm": "gpt-5.6-luna", "deep_think_llm": "gpt-5.6",
         "backend_url": None, "output_language": "English",
