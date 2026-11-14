@@ -39,7 +39,9 @@ services:
     <<: *backend
     environment:
       <<: *backend-environment
+      FRED_API_KEY: ${FRED_API_KEY:-}
       FMP_API_KEY: ${FMP_API_KEY:-}
+      SEC_EDGAR_USER_AGENT: ${SEC_EDGAR_USER_AGENT:-}
     entrypoint: [python, -m, tradingagents.service.backend.runtime]
     command: [serve-worker]
     stop_grace_period: 40s

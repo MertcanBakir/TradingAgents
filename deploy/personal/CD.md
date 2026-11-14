@@ -24,7 +24,8 @@ update EC2 until `PRODUCTION_DEPLOY_ENABLED` is explicitly set to `true`.
 5. The production job is disabled during initial setup. When enabled, it checks
    main again and invokes the restricted `FinBotDeployTradingAgents` SSM document.
    It waits for this exact instance's command invocation and verifies the helper's
-   confirmation; accepting a send-command request is not deployment success.
+   confirmation, including whether the worker received the current AWS data
+   provider settings.
 
 CD runs are serialized separately from CI and are not cancelled by a later push.
 A server-side lock also prevents overlap if a GitHub runner stops while SSM is
@@ -109,14 +110,19 @@ The helper:
 - Checks the image-packaged migration manifest/history read-only, then creates a
   private `.env` backup and applies the compatible migration batch transactionally.
   A migration failure stops before any container restart or image change.
-- Preserves ownership/permissions and atomically
-  changes only `LUCRARI_IMAGE` in the original configuration.
+- Reads the current data provider settings from AWS Parameter Store using the
+  EC2 role and checks that Compose routes them only to the worker.
+- Preserves ownership/permissions and atomically updates `LUCRARI_IMAGE` and
+  the three data provider settings in the private host `.env`.
 - Recreates only `api`, `worker`, `maintenance` with `--no-deps --no-build`.
   It does not replace the server's Compose file, Caddyfile, Caddy container or
   volumes, CA mount, settings or ChatGPT session.
 - Requires two consecutive checks with correct running images, verified HTTPS
   `/healthz` and a nonempty fresh catalog refreshed after the database preflight
   timestamp. This checks worker model discovery, not only API liveness.
+- Verifies the worker environment against the settings read for that deploy.
+  For an already-current image, it recreates only the worker if the settings
+  changed.
 - On failure after mutation, restores the complete original `.env`, recreates
   the previous services and verifies them. The deployment is still reported as
   failed even when rollback succeeds. If rollback also fails, the private backup

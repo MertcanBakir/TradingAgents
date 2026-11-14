@@ -139,5 +139,5 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: eu-west-1
           allowed-account-ids: '500888846202'
-      - name: Deploy through the restricted SSM document and verify completion
+      - name: Deploy and verify the worker's AWS data provider settings
         run: python3 deploy/personal/deploy_request.py

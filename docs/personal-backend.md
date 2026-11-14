@@ -143,11 +143,28 @@ into worker. `/tmp/market-cache` is ephemeral; business state stays in Supabase.
 Docker health or restart alone does not guarantee job health: monitor leases and
 safe job error codes. EC2 is a single point of failure; no HA claim is made.
 
-For the optional FMP industry P/E benchmark, set `FMP_API_KEY` in the host's
-private Compose `.env` file (mode 0600). Compose passes it to the analysis worker
-at runtime. A missing key leaves the Yahoo Finance fallback available. Install
-the updated `compose.personal.yml` on the host before recreating the worker.
-Image-only deployments reuse the host's existing Compose file.
+The worker receives `FRED_API_KEY` for macro series, `FMP_API_KEY` for the
+industry P/E benchmark, and `SEC_EDGAR_USER_AGENT` for SEC requests. FRED is
+optional, FMP can fall back to Yahoo Finance, and SEC uses the application
+identity when no custom value is configured.
+
+Production stores these three values in the `/finbot/tradingagents/production/data-providers`
+AWS Systems Manager SecureString parameter in `eu-west-1`. After updating a
+private local `.env` file (mode 0600), upload the three values with
+`python deploy/personal/upload_data_providers.py` from the project environment.
+The EC2 timer checks the parameter every five minutes and after boot. It updates
+the private host `.env` file and recreates only the worker when needed, deferring
+while an analysis is active. Every main deployment reads the current AWS
+settings on EC2 and verifies the running worker received them before reporting
+success. Values stay out of GitHub and the image.
+
+On a replacement EC2 host, install the updated `compose.personal.yml`, the
+root-owned `sync_data_providers.py` beside the existing `deploy.py` helper, and
+the `finbot-data-providers.service` and `finbot-data-providers.timer` units.
+Give the instance role `ssm:GetParameter` for that specific parameter. Reload
+systemd, enable and start the timer, and run the service once to verify the
+worker received the settings. The GitHub deployment role requires no access to
+the parameter.
 
 `serve-worker` polls every 3 seconds, keeps a host-level daemon lock, and runs
 one supervisor/child at a time. A child also retains an execution lock if its

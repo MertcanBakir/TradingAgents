@@ -41,6 +41,8 @@ def wait(command_id, *, invoke=aws, clock=time.monotonic, sleep=time.sleep):
             result = json.loads(response["StandardOutputContent"].strip())
             if result.get("status") not in {"deployed", "already_current"}:
                 raise RuntimeError("Remote helper did not confirm a verified deployment")
+            if result.get("data_providers_verified") is not True:
+                raise RuntimeError("Remote helper did not verify the worker data provider settings")
             print(json.dumps(result))
             return result
         sleep(5)

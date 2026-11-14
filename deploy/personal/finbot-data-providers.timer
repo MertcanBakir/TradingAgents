@@ -1,0 +1,9 @@
+[Unit]
+Description=Check for updated FinBot data provider settings
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
