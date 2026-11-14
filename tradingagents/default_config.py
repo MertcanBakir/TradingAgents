@@ -167,6 +167,9 @@ def build_default_config() -> dict:
         },
         # Tool-level configuration (takes precedence over category-level)
         "tool_vendors": {
+            "get_industry_pe": "fmp,yfinance",
+            "get_analyst_price_targets": "yfinance",
+            "get_company_pe_history": "yfinance",
             # Example: "get_stock_data": "alpha_vantage",  # Override category default
         },
         # Benchmark for alpha calculation in the reflection layer.

@@ -18,6 +18,7 @@ from tradingagents.dataflows.vendors.alpha_vantage import (
     get_news as get_alpha_vantage_news,
     get_stock as get_alpha_vantage_stock,
 )
+from tradingagents.dataflows.vendors.fmp import get_industry_pe as get_fmp_industry_pe
 from tradingagents.dataflows.vendors.fred import get_macro_data as get_fred_macro_data
 from tradingagents.dataflows.vendors.polymarket import (
     get_prediction_markets as get_polymarket_prediction_markets,
@@ -27,6 +28,7 @@ from tradingagents.dataflows.vendors.sec_edgar import (
     get_cashflow as get_sec_edgar_cashflow,
     get_income_statement as get_sec_edgar_income_statement,
 )
+from tradingagents.dataflows.vendors.sec_outlook import get_company_guidance
 from tradingagents.dataflows.vendors.yahoo.fundamentals import (
     get_balance_sheet as get_yfinance_balance_sheet,
     get_cashflow as get_yfinance_cashflow,
@@ -39,6 +41,15 @@ from tradingagents.dataflows.vendors.yahoo.market import (
     get_YFin_data_online,
 )
 from tradingagents.dataflows.vendors.yahoo.news import get_global_news_yfinance, get_news_yfinance
+from tradingagents.dataflows.vendors.yahoo.outlook import (
+    get_analyst_price_targets,
+    get_estimate_revisions,
+    get_upcoming_earnings,
+)
+from tradingagents.dataflows.vendors.yahoo.valuation import (
+    get_company_pe_history,
+    get_industry_pe as get_yahoo_industry_pe,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +73,13 @@ TOOLS_CATEGORIES = {
             "get_fundamentals",
             "get_balance_sheet",
             "get_cashflow",
-            "get_income_statement"
+            "get_income_statement",
+            "get_estimate_revisions",
+            "get_upcoming_earnings",
+            "get_company_guidance",
+            "get_analyst_price_targets",
+            "get_industry_pe",
+            "get_company_pe_history",
         ]
     },
     "news_data": {
@@ -126,6 +143,12 @@ VENDOR_METHODS = {
         "sec_edgar": get_sec_edgar_income_statement,
         "yfinance": get_yfinance_income_statement,
     },
+    "get_estimate_revisions": {"yfinance": get_estimate_revisions},
+    "get_upcoming_earnings": {"yfinance": get_upcoming_earnings},
+    "get_company_guidance": {"sec_edgar": get_company_guidance},
+    "get_analyst_price_targets": {"yfinance": get_analyst_price_targets},
+    "get_industry_pe": {"fmp": get_fmp_industry_pe, "yfinance": get_yahoo_industry_pe},
+    "get_company_pe_history": {"yfinance": get_company_pe_history},
     # news_data
     "get_news": {
         "alpha_vantage": get_alpha_vantage_news,

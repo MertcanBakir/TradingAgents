@@ -1,7 +1,7 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from tradingagents.agents.analysts import fundamentals_analyst, news_analyst
+from tradingagents.agents.analysts import news_analyst
 
 
 @dataclass(frozen=True)
@@ -40,7 +40,6 @@ ANALYST_NODE_SPECS: dict[str, AnalystNodeSpec] = {
         key="fundamentals",
         agent_node="Fundamentals Analyst",
         report_key="fundamentals_report",
-        tools=fundamentals_analyst.TOOLS,
     ),
 }
 

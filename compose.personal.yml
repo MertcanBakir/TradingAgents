@@ -13,7 +13,7 @@ x-backend: &backend
     - /tmp:mode=1777,size=256m
   cap_drop: [ALL]
   security_opt: [no-new-privileges:true]
-  environment:
+  environment: &backend-environment
     LUCRARI_BACKEND_SETTINGS_FILE: /run/private/settings.json
     TRADINGAGENTS_NO_UPDATE_CHECK: "1"
     TRADINGAGENTS_CACHE_DIR: /tmp/market-cache
@@ -37,6 +37,9 @@ services:
     expose: ["8000"]
   worker:
     <<: *backend
+    environment:
+      <<: *backend-environment
+      FMP_API_KEY: ${FMP_API_KEY:-}
     entrypoint: [python, -m, tradingagents.service.backend.runtime]
     command: [serve-worker]
     stop_grace_period: 40s

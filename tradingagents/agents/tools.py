@@ -169,6 +169,64 @@ def get_income_statement(
 
 
 @tool
+def get_estimate_revisions(
+    ticker: Annotated[str, InjectedState("company_of_interest")],
+    curr_date: Annotated[str, "analysis date, yyyy-mm-dd"] = None,
+    trade_date: Annotated[str, InjectedState("trade_date")] = "",
+) -> dict | str:
+    """Get dated EPS and revenue consensus estimates and available revision history."""
+    return route_to_vendor("get_estimate_revisions", ticker, as_of(curr_date, trade_date))
+
+
+@tool
+def get_upcoming_earnings_and_guidance(
+    ticker: Annotated[str, InjectedState("company_of_interest")],
+    curr_date: Annotated[str, "analysis date, yyyy-mm-dd"] = None,
+    trade_date: Annotated[str, InjectedState("trade_date")] = "",
+) -> dict:
+    """Get the next earnings date and officially published revenue and EPS outlook."""
+    day = as_of(curr_date, trade_date)
+    result = {}
+    for key, method in (("calendar", "get_upcoming_earnings"), ("company", "get_company_guidance")):
+        try:
+            result[key] = route_to_vendor(method, ticker, day)
+        except Exception as exc:
+            result[key] = {"unavailable": f"Data could not be retrieved ({type(exc).__name__})."}
+    company = result["company"]
+    if isinstance(company, dict) and company.get("confirmed_earnings"):
+        result["calendar"] = company["confirmed_earnings"]
+        result["company"] = {key: value for key, value in company.items() if key != "confirmed_earnings"}
+    return result
+
+
+@tool
+def get_analyst_price_targets(
+    ticker: Annotated[str, InjectedState("company_of_interest")],
+    curr_date: Annotated[str, "analysis date, yyyy-mm-dd"] = None,
+    trade_date: Annotated[str, InjectedState("trade_date")] = "",
+) -> dict | str:
+    """Get aggregate analyst price targets from Yahoo Finance."""
+    return route_to_vendor("get_analyst_price_targets", ticker, as_of(curr_date, trade_date))
+
+
+@tool
+def get_valuation_benchmarks(
+    ticker: Annotated[str, InjectedState("company_of_interest")],
+    curr_date: Annotated[str, "analysis date, yyyy-mm-dd"] = None,
+    trade_date: Annotated[str, InjectedState("trade_date")] = "",
+) -> dict:
+    """Get industry and company historical P/E benchmarks for the stock."""
+    day = as_of(curr_date, trade_date)
+    result = {}
+    for key, method in (("industry", "get_industry_pe"), ("company_history", "get_company_pe_history")):
+        try:
+            result[key] = route_to_vendor(method, ticker, day)
+        except Exception as exc:
+            result[key] = {"unavailable": f"Data could not be retrieved ({type(exc).__name__})."}
+    return result
+
+
+@tool
 def get_news(
     ticker: Annotated[str, InjectedState("company_of_interest")],
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],

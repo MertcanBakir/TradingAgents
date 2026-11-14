@@ -143,6 +143,12 @@ into worker. `/tmp/market-cache` is ephemeral; business state stays in Supabase.
 Docker health or restart alone does not guarantee job health: monitor leases and
 safe job error codes. EC2 is a single point of failure; no HA claim is made.
 
+For the optional FMP industry P/E benchmark, set `FMP_API_KEY` in the host's
+private Compose `.env` file (mode 0600). Compose passes it to the analysis worker
+at runtime. A missing key leaves the Yahoo Finance fallback available. Install
+the updated `compose.personal.yml` on the host before recreating the worker.
+Image-only deployments reuse the host's existing Compose file.
+
 `serve-worker` polls every 3 seconds, keeps a host-level daemon lock, and runs
 one supervisor/child at a time. A child also retains an execution lock if its
 parent dies. A second child fails safely instead of overlapping it. The child

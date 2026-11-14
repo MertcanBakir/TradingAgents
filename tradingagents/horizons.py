@@ -1,4 +1,4 @@
-"""Shared analysis horizons and their daily technical indicator profiles."""
+"""Shared analysis horizons and their technical and fundamental data windows."""
 
 from typing import Literal
 
@@ -15,6 +15,7 @@ HORIZON_CONFIG = {
         "required_groups": ("ema", "rsi", "macd", "atr", "rvol"),
         "target_days": 21,
         "history_rows": 180,
+        "fundamentals_lookback_months": 7,
         "primary_timeframe": "1d",
         "sma": (20, 50),
         "ema": (10, 20),
@@ -34,6 +35,7 @@ HORIZON_CONFIG = {
         "required_groups": ("sma", "ema", "macd", "adx", "rvol", "atr"),
         "target_days": 63,
         "history_rows": 350,
+        "fundamentals_lookback_months": 13,
         "primary_timeframe": "1d",
         "sma": (50, 200),
         "ema": (20, 50),
@@ -53,6 +55,7 @@ HORIZON_CONFIG = {
         "required_groups": ("sma", "roc", "macd", "atr", "adx"),
         "target_days": 252,
         "history_rows": 1000,
+        "fundamentals_lookback_months": 13,
         "primary_timeframe": "1d",
         "sma": (50, 200),
         "ema": (50, 100),
