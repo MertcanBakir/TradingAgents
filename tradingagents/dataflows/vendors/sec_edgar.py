@@ -105,17 +105,22 @@ def _user_agent() -> str:
 
 
 
-def _fetch_json(url: str) -> dict:
+def _request(url: str) -> requests.Response:
     """Read a public EDGAR document, respecting SEC's identification rule."""
     try:
         response = requests.get(url, headers={"User-Agent": _user_agent()}, timeout=30)
         response.raise_for_status()
-        return response.json()
+        return response
     except requests.RequestException as exc:
         status = getattr(getattr(exc, "response", None), "status_code", None)
         # Every failure here is "this vendor cannot serve it now", so the router
         # moves on instead of seeing a transport exception it has no rule for.
         raise VendorUnavailableError(f"SEC EDGAR request failed ({status or type(exc).__name__})") from exc
+
+
+def _fetch_json(url: str) -> dict:
+    try:
+        return _request(url).json()
     except ValueError as exc:
         raise VendorUnavailableError("SEC EDGAR returned an unreadable response") from exc
 

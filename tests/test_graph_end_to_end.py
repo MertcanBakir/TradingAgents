@@ -53,7 +53,7 @@ class ScriptedModel(BaseChatModel):
     structured: bool = False
     tools: tuple = ()
     calls: list = Field(default_factory=list)   # shared across bound copies
-    threads: set = Field(default_factory=set)   # threads that served a tool-bound call
+    threads: set = Field(default_factory=set)   # threads that served News or Fundamentals
     fail_at: int | None = None                  # raise on this call, once
 
     @property
@@ -75,7 +75,7 @@ class ScriptedModel(BaseChatModel):
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
         self._count()
-        if self.tools:
+        if self.tools or str(messages[0].content).startswith("You are the Fundamentals Analyst."):
             import threading
             import time
             self.threads.add(threading.current_thread().name)
@@ -199,7 +199,9 @@ def test_a_full_run_reaches_a_logged_decision(tmp_path, monkeypatch, offline, st
     tool_methods = {"get_news", "get_global_news",
                     "get_macro_indicators", "get_prediction_markets", "get_fundamentals",
                     "get_balance_sheet", "get_cashflow", "get_income_statement",
-                    "get_insider_transactions", "ohlcv"}
+                    "get_insider_transactions", "get_estimate_revisions", "get_upcoming_earnings",
+                    "get_company_guidance", "get_analyst_price_targets", "get_industry_pe",
+                    "get_company_pe_history", "ohlcv"}
     assert offline == tool_methods
     assert [e["rating"] for e in graph.memory_log.load_entries()] == ["Overweight"]
 
@@ -256,7 +258,7 @@ def test_a_debug_run_prints_the_analysts_work_and_reaches_the_same_decision(tmp_
     assert signal == "Overweight"
     assert state["market_report"].strip() and state["fundamentals_report"].strip()
     printed = capsys.readouterr().out
-    assert "get_news" in printed and "get_balance_sheet" in printed
+    assert "get_news" in printed
 
 
 @pytest.mark.unit
@@ -321,8 +323,7 @@ def test_an_analyst_that_keeps_calling_tools_writes_its_report_at_the_limit(tmp_
 
     final_state, rating = graph.propagate("NVDA", TRADE_DATE)
 
-    # Each of the two tool-using analysts must obey the active limit.
-    assert len(model.tool_turns) == 2 * graph.config["max_tool_rounds"]
+    assert len(model.tool_turns) == graph.config["max_tool_rounds"]
     assert "\n\nReport.\n\n### SciPy support and resistance zones" in final_state["market_report"]
     assert "**Rating**:" not in final_state["market_report"]
     assert "FINAL TRANSACTION PROPOSAL" not in final_state["market_report"]
@@ -344,7 +345,7 @@ def test_the_last_turn_is_offered_no_tools_and_reads_its_tool_results_as_text(tm
     graph.propagate("NVDA", TRADE_DATE)
 
     wrap_ups = [h for h in model.last_turns if isinstance(h[-1], HumanMessage) and "tool round" in h[-1].content]
-    assert len(wrap_ups) == 2
+    assert len(wrap_ups) == 1
     for history in wrap_ups:
         assert not any(isinstance(m, ToolMessage) or getattr(m, "tool_calls", None) for m in history)
         assert any("returned]" in str(m.content) for m in history)
@@ -532,6 +533,22 @@ def test_agent_stats_cover_parallel_nodes_tools_and_reset(tmp_path, monkeypatch,
     assert market["data_accesses"] == {"market_price_history": 1}
     assert rows["Sentiment Analyst"]["tools"] == {}
     assert rows["Sentiment Analyst"]["data_accesses"].get("get_news") == 1
+    fundamentals = rows["Fundamentals Analyst"]
+    assert fundamentals["llm_calls"] == 1
+    assert fundamentals["tools"] == {}
+    assert fundamentals["data_accesses"] == {
+        "get_fundamentals": 1,
+        "get_income_statement": 1,
+        "get_balance_sheet": 1,
+        "get_cashflow": 1,
+        "get_insider_transactions": 1,
+        "get_estimate_revisions": 1,
+        "get_upcoming_earnings": 1,
+        "get_company_guidance": 1,
+        "get_analyst_price_targets": 1,
+        "get_industry_pe": 1,
+        "get_company_pe_history": 1,
+    }
     assert rows["Bull Researcher"]["llm_calls"] == 1
     # Reusing a graph must not carry measurements from the previous run.
     again, _ = graph.propagate("NVDA", TRADE_DATE)
