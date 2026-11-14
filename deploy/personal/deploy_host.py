@@ -14,6 +14,7 @@ import re
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.request
@@ -76,9 +77,11 @@ def atomic_env(path, text):
 
 
 class Commands:
-    def __init__(self, directory, docker_config):
+    def __init__(self, directory, docker_config, *, provider_names=()):
         self.directory = directory
         self.environment = {**os.environ, "DOCKER_CONFIG": docker_config}
+        for name in provider_names:
+            self.environment.pop(name, None)
 
     def __call__(self, args, *, input_text=None):
         try:
@@ -92,10 +95,12 @@ class Commands:
 
 
 class Deployment:
-    def __init__(self, config, run, *, clock=time.monotonic, sleep=time.sleep, health=None):
+    def __init__(self, config, run, *, clock=time.monotonic, sleep=time.sleep, health=None,
+                 providers=None):
         self.config, self.run = config, run
         self.clock, self.sleep = clock, sleep
         self.health = health or self.https_health
+        self.providers = providers
         self.base = Path(config["directory"])
         self.env_path = self.base / ".env"
         self.compose = ["docker", "compose", "--project-name", "lucrari-personal",
@@ -235,6 +240,45 @@ class Deployment:
                     result["removed"].append(ref)
         return result
 
+    def provider_settings(self, previous):
+        if self.providers is None:
+            return previous, None
+        try:
+            values = self.providers.read_provider_settings()
+            self.providers.check_worker_configuration()
+            return self.providers.updated_env(previous, values), values
+        except Exception:
+            raise DeploymentError("Could not prepare data provider settings from Parameter Store") from None
+
+    def providers_match(self, values):
+        if values is None:
+            return True
+        try:
+            return self.providers.worker_matches(values)
+        except Exception:
+            raise DeploymentError("Could not verify worker data settings") from None
+
+    def refresh_current_worker(self, previous, updated, values, image, edge):
+        if updated == previous and self.providers_match(values):
+            self.verify(image, edge, 0)
+            return
+        restart = [*self.compose, "up", "--detach", "--no-deps", "--no-build",
+                   "--pull", "never", "--force-recreate", "worker"]
+        try:
+            atomic_env(self.env_path, updated)
+            self.run(restart)
+            if not self.providers_match(values):
+                raise DeploymentError("Worker did not receive the current provider settings")
+            self.verify(image, edge, 0)
+        except Exception:
+            try:
+                atomic_env(self.env_path, previous)
+                self.run(restart)
+                self.verify(image, edge, 0)
+            except Exception:
+                raise DeploymentError("Provider update and worker rollback failed") from None
+            raise DeploymentError("Provider update failed; previous worker configuration restored") from None
+
     def deploy(self, digest, commit):
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest) or not re.fullmatch(r"[0-9a-f]{40}", commit):
             raise DeploymentError("Invalid digest or commit")
@@ -254,14 +298,17 @@ class Deployment:
         if previous == image:
             self.verify_image(image, commit, before.get("schema_revision", 1))
             self.migrate(image)
+            updated_text, provider_values = self.provider_settings(previous_text)
             migrations = self.migrate(image, apply=True)
-            self.verify(image, edge, 0)
-            return {"status": "already_current", "image": image, "migrations": migrations}
+            self.refresh_current_worker(previous_text, updated_text, provider_values, image, edge)
+            return {"status": "already_current", "image": image, "migrations": migrations,
+                    "data_providers_verified": provider_values is not None}
         password = self.run(["aws", "ecr", "get-login-password", "--region", "eu-west-1"])
         self.run(["docker", "login", "--username", "AWS", "--password-stdin", REPOSITORY.split("/")[0]], input_text=password)
         self.run(["docker", "pull", image])
         self.verify_image(image, commit, before.get("schema_revision", 1))
         self.migrate(image)
+        updated_text, provider_values = self.provider_settings(previous_text)
         previous_info = json.loads(self.run(["docker", "image", "inspect", previous]))[0]
         previous_schema = (previous_info["Config"].get("Labels") or {}).get("io.finbot.backend-schema", "1")
         rollback_compatible = previous_schema == str(before.get("schema_revision", 1))
@@ -279,8 +326,10 @@ class Deployment:
         # Successful additive schema changes stay applied during image rollback.
         migrations = self.migrate(image, apply=True)
         try:
-            atomic_env(self.env_path, update_image(previous_text, image))
+            atomic_env(self.env_path, update_image(updated_text, image))
             self.run([*self.compose, "up", "--detach", "--no-deps", "--no-build", "--force-recreate", *SERVICES])
+            if not self.providers_match(provider_values):
+                raise DeploymentError("Worker did not receive the current provider settings")
             self.verify(image, edge, before["clock"])
         except Exception:
             if not rollback_compatible:
@@ -293,6 +342,7 @@ class Deployment:
                 raise DeploymentError("Deployment and rollback failed; private backup retained") from None
             raise DeploymentError("Deployment failed; previous image restored and verified") from None
         return {"status": "deployed", "image": image, "commit": commit,
+                "data_providers_verified": provider_values is not None,
                 "previous_image": previous, "active_jobs_before": before["active_jobs"],
                 "migrations": migrations, "image_retention": self.retain_images(image, previous=previous)}
 
@@ -327,7 +377,18 @@ def main():
             raise DeploymentError("Deployment interrupted")
         signal.signal(signal.SIGTERM, interrupted)
         with tempfile.TemporaryDirectory(prefix="finbot-ecr-") as credentials:
-            deploy = Deployment(config, Commands(config["directory"], credentials))
+            providers = None
+            if not args.retention_preview:
+                # SSM runs the digest-pinned helper under versions/. The
+                # provider module is installed beside the original helper.
+                sys.path.insert(0, "/usr/local/libexec/finbot-tradingagents")
+                try:
+                    import sync_data_providers as providers
+                except ImportError:
+                    raise DeploymentError("Host data provider sync helper is missing") from None
+            names = providers.NAMES if providers is not None else ()
+            deploy = Deployment(config, Commands(config["directory"], credentials, provider_names=names),
+                                providers=providers)
             if args.retention_preview:
                 result = deploy.retain_images(image_setting(deploy.env_path.read_text()), preview=True)
             else:

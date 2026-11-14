@@ -243,7 +243,13 @@ def test_personal_child_reuses_upstream_callable_without_any_llm_api_key(tmp_pat
     for key in PROVIDER_API_KEY_ENV.values():
         if key:
             monkeypatch.setenv(key, "INHERITED_PRIVATE_KEY")
-    monkeypatch.setenv("FMP_API_KEY", "PRIVATE_FMP_TEST_KEY")
+    market_data_env = {
+        "FRED_API_KEY": "PRIVATE_FRED_TEST_KEY",
+        "FMP_API_KEY": "PRIVATE_FMP_TEST_KEY",
+        "SEC_EDGAR_USER_AGENT": "Integration Test test@example.invalid",
+    }
+    for name, value in market_data_env.items():
+        monkeypatch.setenv(name, value)
     calls = []
 
     def run(request, **kwargs):
@@ -253,7 +259,7 @@ def test_personal_child_reuses_upstream_callable_without_any_llm_api_key(tmp_pat
 
         assert _chatgpt_credential()() == "PRIVATE_ACCESS"
         assert all(key not in os.environ for key in PROVIDER_API_KEY_ENV.values() if key)
-        assert os.environ["FMP_API_KEY"] == "PRIVATE_FMP_TEST_KEY"
+        assert {name: os.environ[name] for name in market_data_env} == market_data_env
         calls.append(kwargs)
         return worker_result(job)
 
@@ -297,8 +303,13 @@ def test_compose_does_not_mount_chatgpt_into_api_or_maintenance():
     assert any("/run/chatgpt" in v for v in services["worker"]["volumes"])
     assert "ports" not in services["api"]
     assert services["worker"]["read_only"] is True
-    assert {name for name, service in services.items()
-            if "FMP_API_KEY" in service.get("environment", {})} == {"worker"}
+    for variable in ("FRED_API_KEY", "FMP_API_KEY", "SEC_EDGAR_USER_AGENT"):
+        configurations = {
+            name: service["environment"][variable]
+            for name, service in services.items()
+            if variable in service.get("environment", {})
+        }
+        assert configurations == {"worker": "${" + variable + ":-}"}
 
 
 def test_upstream_rotation_is_persisted_once_across_concurrent_callers(tmp_path, monkeypatch):

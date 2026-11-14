@@ -1,0 +1,8 @@
+[Unit]
+Description=Sync FinBot data providers from AWS Parameter Store
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/libexec/finbot-tradingagents/sync_data_providers.py

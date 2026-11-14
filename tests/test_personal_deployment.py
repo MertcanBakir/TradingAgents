@@ -9,6 +9,7 @@ import stat
 import subprocess
 import tarfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -176,7 +177,9 @@ class Docker:
             if "ps" in args:
                 return args[-1]
             if "up" in args:
-                assert args[-3:] == ["api", "worker", "maintenance"]
+                assert args[-3:] == ["api", "worker", "maintenance"] or (
+                    args[-1] == "worker" and "--pull" in args
+                )
                 assert "--no-deps" in args and "--no-build" in args
                 self.image = host.image_setting((self.root / ".env").read_text())
                 self.updates.append(self.image)
@@ -211,6 +214,48 @@ def test_deploy_preserves_private_settings_permissions_and_caddy(deployment):
     assert docker.updates == [NEW]
     assert docker.migrations == ["--check", "--apply"]
     assert deploy.container("edge")["Id"] == "edge"
+
+
+@pytest.mark.parametrize("same_image", [False, True])
+def test_deployment_applies_and_verifies_provider_settings(deployment, same_image):
+    deploy, docker, env, original = deployment
+    values = {"FRED_API_KEY": "fake-new-key"}
+    calls = []
+
+    def verify(actual):
+        calls.append(actual)
+        return "FRED_API_KEY=fake-new-key" in env.read_text()
+
+    deploy.providers = SimpleNamespace(
+        read_provider_settings=lambda: values,
+        check_worker_configuration=lambda: None,
+        updated_env=lambda text, data: text + f"FRED_API_KEY={data['FRED_API_KEY']}\n",
+        worker_matches=verify,
+    )
+    digest = OLD.rsplit("@", 1)[1] if same_image else DIGEST
+
+    result = deploy.deploy(digest, SHA)
+
+    assert result["data_providers_verified"] is True
+    assert calls == [values]
+    assert docker.updates == [OLD if same_image else NEW]
+    assert env.read_text() == original.replace(OLD, OLD if same_image else NEW) + "FRED_API_KEY=fake-new-key\n"
+
+
+def test_provider_verification_failure_rolls_back_deployment(deployment):
+    deploy, docker, env, original = deployment
+    deploy.providers = SimpleNamespace(
+        read_provider_settings=lambda: {"FRED_API_KEY": "fake-new-key"},
+        check_worker_configuration=lambda: None,
+        updated_env=lambda text, _: text + "FRED_API_KEY=fake-new-key\n",
+        worker_matches=lambda _: False,
+    )
+
+    with pytest.raises(host.DeploymentError, match="previous image restored"):
+        deploy.deploy(DIGEST, SHA)
+
+    assert env.read_text() == original
+    assert docker.updates == [NEW, OLD]
 
 
 @pytest.mark.parametrize("failure", ["bad_catalog", "stale_catalog", "https"])
@@ -319,11 +364,12 @@ def test_subprocess_failures_never_expose_private_output(tmp_path, monkeypatch):
 def test_ssm_wait_handles_eventual_consistency_and_checks_helper_confirmation():
     responses = iter([None, {"Status": "InProgress"},
                       {"Status": "Success", "ResponseCode": 0,
-                       "StandardOutputContent": '{"status":"deployed"}'}])
+                       "StandardOutputContent": '{"status":"deployed","data_providers_verified":true}'}])
     result = deploy_request.wait("command", invoke=lambda *a: next(responses), sleep=lambda _: None)
     assert result["status"] == "deployed"
     for response in [{"Status": "Failed", "ResponseCode": 1},
-                     {"Status": "Success", "ResponseCode": 0, "StandardOutputContent": '{"status":"failed"}'}]:
+                     {"Status": "Success", "ResponseCode": 0, "StandardOutputContent": '{"status":"failed"}'},
+                     {"Status": "Success", "ResponseCode": 0, "StandardOutputContent": '{"status":"deployed"}'}]:
         with pytest.raises(RuntimeError):
             deploy_request.wait("command", invoke=lambda *a, response=response: response, sleep=lambda _: None)
 
